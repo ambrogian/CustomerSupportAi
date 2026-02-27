@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { useSocket } from '../hooks/useSocket';
 
 interface ChatMessage {
     role: 'customer' | 'agent';
@@ -27,10 +28,33 @@ const QUICK_MESSAGES = [
 
 export default function CustomerChat() {
     const [selectedCustomer, setSelectedCustomer] = useState(CUSTOMERS[0]);
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const { chatMessages } = useSocket();
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const chatRef = useRef<HTMLDivElement>(null);
+    const [localError, setLocalError] = useState<string | null>(null);
+
+    // Merge global websocket messages and local transient errors
+    const messages = useMemo(() => {
+        const msgs: ChatMessage[] = chatMessages
+            .filter(m => m.customerName === selectedCustomer.id || m.customerName === selectedCustomer.name)
+            .map(m => ({
+                role: m.role,
+                text: m.message,
+                timestamp: m.timestamp,
+                action: m.action,
+                creditAmount: m.creditAmount,
+            }));
+
+        if (localError) {
+            msgs.push({
+                role: 'agent',
+                text: `Sorry, I encountered an error: ${localError} `,
+                timestamp: new Date().toISOString(),
+            });
+        }
+        return msgs;
+    }, [chatMessages, selectedCustomer, localError]);
 
     useEffect(() => {
         if (chatRef.current) {
@@ -41,14 +65,9 @@ export default function CustomerChat() {
     const sendMessage = async (text: string) => {
         if (!text.trim() || loading) return;
 
-        const customerMsg: ChatMessage = {
-            role: 'customer',
-            text: text.trim(),
-            timestamp: new Date().toISOString(),
-        };
-        setMessages(prev => [...prev, customerMsg]);
         setInput('');
         setLoading(true);
+        setLocalError(null);
 
         try {
             const res = await fetch('http://localhost:3001/api/chat', {
@@ -65,32 +84,8 @@ export default function CustomerChat() {
             if (!res.ok) {
                 throw new Error(data.error || 'Server returned an error');
             }
-
-            // Determine which tools were used based on the response
-            const toolsUsed: string[] = ['Neo4j Context'];
-            if (data.policy) toolsUsed.push('Senso Policy');
-            toolsUsed.push('Fastino LLM');
-            if (data.action === 'apply_credit' || data.action === 'process_refund') {
-                toolsUsed.push('Yutori Browsing');
-            }
-
-            const agentMsg: ChatMessage = {
-                role: 'agent',
-                text: data.message !== undefined && data.message !== "" ? data.message : 'I understood your request but decided not to send a message back.',
-                timestamp: new Date().toISOString(),
-                action: data.action,
-                creditAmount: data.creditAmount,
-                reasoning: data.reasoning,
-                toolsUsed,
-            };
-            setMessages(prev => [...prev, agentMsg]);
         } catch (err: any) {
-            const errorMsg: ChatMessage = {
-                role: 'agent',
-                text: `Sorry, I encountered an error: ${err.message}`,
-                timestamp: new Date().toISOString(),
-            };
-            setMessages(prev => [...prev, errorMsg]);
+            setLocalError(err.message);
         } finally {
             setLoading(false);
         }
@@ -181,7 +176,6 @@ export default function CustomerChat() {
                         key={c.id}
                         onClick={() => {
                             setSelectedCustomer(c);
-                            setMessages([]);
                         }}
                         style={{
                             padding: '4px 12px',
@@ -284,7 +278,7 @@ export default function CustomerChat() {
                             marginLeft: msg.role === 'agent' ? '12px' : '0',
                             marginRight: msg.role === 'customer' ? '12px' : '0',
                         }}>
-                            {msg.role === 'agent' ? '🤖 Resolve Agent' : `${selectedCustomer.name}`}
+                            {msg.role === 'agent' ? '🤖 Resolve Agent' : `${selectedCustomer.name} `}
                         </span>
 
                         {/* Bubble */}

@@ -24,6 +24,7 @@ interface GraphData {
 
 interface Props {
   graphVersion: number;
+  customerId?: string | null;
 }
 
 const NODE_COLORS: Record<string, string> = {
@@ -40,7 +41,7 @@ const NODE_SIZES: Record<string, number> = {
   Resolution: 6,
 };
 
-export default function GraphPanel({ graphVersion }: Props) {
+export default function GraphPanel({ graphVersion, customerId }: Props) {
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'nodes' | 'clusters'>('nodes');
@@ -50,7 +51,8 @@ export default function GraphPanel({ graphVersion }: Props) {
 
   const fetchGraph = useCallback(async () => {
     try {
-      const res = await fetch('/api/graph');
+      const url = customerId ? `/api/graph?customerId=${customerId}` : '/api/graph';
+      const res = await fetch(url);
       if (!res.ok) { setLoading(false); return; }
       const data = await res.json();
       if (!data.nodes || !data.links) { setLoading(false); return; }
@@ -82,7 +84,7 @@ export default function GraphPanel({ graphVersion }: Props) {
       console.error('Failed to fetch graph:', err);
       setLoading(false);
     }
-  }, [graphData.nodes.length]);
+  }, [graphData.nodes.length, customerId]);
 
   useEffect(() => {
     fetchGraph();

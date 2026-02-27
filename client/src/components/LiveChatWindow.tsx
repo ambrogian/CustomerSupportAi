@@ -92,7 +92,7 @@ export default function LiveChatWindow({ chatMessages }: Props) {
     setSending(true);
     setReplyText('');
     try {
-      await fetch('/api/chat', {
+      await fetch('/api/chat/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ customerId, message: text }),

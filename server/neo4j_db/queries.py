@@ -53,33 +53,53 @@ def get_all_orders() -> list:
         return [dict(record) for record in result]
 
 
-def get_graph_data() -> dict:
+def get_graph_data(customer_id: str = None) -> dict:
     """
     Return all nodes and relationships for the frontend graph visualization.
+    If customer_id is provided, only returns the subgraph for that customer.
     """
     driver = get_driver()
 
-    nodes_query = """
-    MATCH (n)
-    WHERE n:Customer OR n:Order OR n:Issue OR n:Resolution
-    RETURN n, labels(n) AS labels
-    """
-    rels_query = """
-    MATCH (a)-[r]->(b)
-    WHERE (a:Customer OR a:Order OR a:Issue OR a:Resolution)
-      AND (b:Customer OR b:Order OR b:Issue OR b:Resolution)
-    RETURN a.id AS source, type(r) AS type, b.id AS target
-    """
+    if customer_id:
+        nodes_query = """
+        MATCH path = (c:Customer {id: $customer_id})-[*0..3]-()
+        UNWIND nodes(path) AS n
+        WITH DISTINCT n
+        WHERE n:Customer OR n:Order OR n:Issue OR n:Resolution
+        RETURN n, labels(n) AS labels
+        """
+        rels_query = """
+        MATCH path = (c:Customer {id: $customer_id})-[*1..3]-()
+        UNWIND relationships(path) AS r
+        WITH DISTINCT r
+        WHERE (startNode(r):Customer OR startNode(r):Order OR startNode(r):Issue OR startNode(r):Resolution)
+          AND (endNode(r):Customer OR endNode(r):Order OR endNode(r):Issue OR endNode(r):Resolution)
+        RETURN startNode(r).id AS source, type(r) AS type, endNode(r).id AS target
+        """
+        params = {"customer_id": customer_id}
+    else:
+        nodes_query = """
+        MATCH (n)
+        WHERE n:Customer OR n:Order OR n:Issue OR n:Resolution
+        RETURN n, labels(n) AS labels
+        """
+        rels_query = """
+        MATCH (a)-[r]->(b)
+        WHERE (a:Customer OR a:Order OR a:Issue OR a:Resolution)
+          AND (b:Customer OR b:Order OR b:Issue OR b:Resolution)
+        RETURN a.id AS source, type(r) AS type, b.id AS target
+        """
+        params = {}
 
     with driver.session() as session:
         nodes = []
-        for record in session.run(nodes_query):
+        for record in session.run(nodes_query, **params):
             node_data = dict(record["n"])
             node_data["_labels"] = record["labels"]
             nodes.append(node_data)
 
         links = []
-        for record in session.run(rels_query):
+        for record in session.run(rels_query, **params):
             links.append({
                 "source": record["source"],
                 "type": record["type"],

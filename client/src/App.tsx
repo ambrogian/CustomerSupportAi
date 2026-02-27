@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import './index.css';
 import { useSocket } from './hooks/useSocket';
@@ -12,6 +12,15 @@ import LiveChatWindow from './components/LiveChatWindow';
 function App() {
   const { isConnected, activities, graphVersion, chatMessages } = useSocket();
   const [activeTab] = useState('overview');
+
+  const activeCustomerId = useMemo(() => {
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+      if (chatMessages[i].role === 'customer') {
+        return chatMessages[i].customerName;
+      }
+    }
+    return null;
+  }, [chatMessages]);
 
   const handleTriggerDelay = useCallback(async (orderId: string, daysLate: number) => {
     try {
@@ -125,7 +134,7 @@ function App() {
 
         {/* Center Column: Knowledge Graph */}
         <div className="panel" style={{ borderRight: '1px solid var(--border-color)' }}>
-          <GraphPanel graphVersion={graphVersion} />
+          <GraphPanel graphVersion={graphVersion} customerId={activeCustomerId} />
         </div>
 
         {/* Right Column: Readiness + Anomalies */}

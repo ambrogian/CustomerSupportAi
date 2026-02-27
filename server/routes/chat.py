@@ -69,10 +69,33 @@ def chat():
 
     # Emit agent response as chat message to dashboard
     agent_msg = result.get("message", "")
-    emit_chat_message("agent", customer_name, agent_msg, action, result.get("creditAmount", 0))
+    emit_chat_message("agent", customer_id, agent_msg, action, result.get("creditAmount", 0))
     emit_message_sent(customer_name, agent_msg)
 
     if order_id:
         emit_graph_updated()
 
     return jsonify(result), 200
+
+@chat_bp.route("/api/chat/agent", methods=["POST"])
+def agent_reply():
+    """Endpoint for human agent replies from the business dashboard."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    customer_id = data.get("customerId")
+    message = data.get("message")
+
+    if not customer_id or not message:
+        return jsonify({"error": "customerId and message are required"}), 400
+
+    # For the agent reply, we don't trigger the orchestrator.
+    # We simply emit it via WebSocket so both views can see it.
+    # We could also insert a Resolution node in Neo4j if we wanted persistent record.
+    customer_name = "Resolve Agent"
+    
+    emit_activity("system", f"Agent sent a manual reply to {customer_id}")
+    emit_chat_message("agent", customer_name, message, "send_message", 0)
+
+    return jsonify({"success": True}), 200

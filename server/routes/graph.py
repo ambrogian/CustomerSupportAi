@@ -2,7 +2,7 @@
 GET /api/graph — returns all Neo4j nodes and relationships for the
 frontend graph visualization.
 """
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from server.neo4j_db.queries import get_graph_data, get_all_orders
 
 graph_bp = Blueprint("graph", __name__)
@@ -34,8 +34,9 @@ _DEMO_ORDERS = [
 @graph_bp.route("/api/graph", methods=["GET"])
 def graph():
     """Return all nodes + relationships for react-force-graph."""
+    customer_id = request.args.get("customerId")
     try:
-        data = get_graph_data()
+        data = get_graph_data(customer_id)
         return jsonify(data), 200
     except Exception:
         return jsonify(_DEMO_GRAPH), 200
