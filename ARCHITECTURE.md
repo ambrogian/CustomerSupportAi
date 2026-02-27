@@ -164,3 +164,27 @@ Each event is color-coded by source:
 | 🟠 LLM | Orange | AI decision made |
 | 🔵 Browsing API | Cyan | Shopify navigation steps |
 | ⚪ System | Gray | Agent loop status, messages sent |
+
+---
+
+## Frequently Asked Questions
+
+**What does the agent actually do and how does it orchestrate?**
+The core of Resolve is the `Orchestrator` (`server/orchestrator/orchestrator.py`). It is a pipeline that is triggered either every 60 seconds by the background agent loop or manually via a customer chat message.
+1. It gathers context from **Neo4j** (customer tier, LTV, past issues).
+2. It gathers policy rules from **Senso** (refund thresholds, credit amounts).
+3. It gathers external context from **Tavily/Yutori** (weather delays, carrier status).
+4. It sends all this data to the **Fastino LLM** (Qwen3-32B) to make a decision.
+5. If the LLM decides to apply a credit or refund, the Orchestrator calls the **Yutori Browsing API** to execute the action in Shopify autonomously.
+6. Finally, it records the entire interaction back into **Neo4j** as an `Issue` and `Resolution`.
+
+**What are the web agents trying to find?**
+- **Tavily Web Search**: Searches the live web for news and updates affecting shipping, such as "FedEx weather delays" to understand the *cause* of an issue.
+- **Yutori Scouting API**: Monitors carrier tracking pages to find the exact delivery status and days late of a specific package.
+- **Yutori Browsing API**: Acts as an autonomous web navigator. It finds the specific UI elements inside your Shopify Admin dashboard (e.g., the 'Refund' button or the 'Credit Amount' input field) to perform administrative tasks on your behalf.
+
+**What can a customer chat with the bot about?**
+The bot is a general-purpose LLM, so it can handle general conversational chat, but its system prompt restricts it to acting as a customer service agent for the DTC sneaker brand. It is primarily designed to autonomously resolve order-related support tickets. Customers can ask it to check their order status, complain about delays, or ask for compensation. The bot can independently decide to grant credits, process refunds, or escalate to a human based on the company policy stored in Senso.
+
+**Does my Neo4j graph update with the memory of the conversation with the chatbot?**
+Yes. When an issue is handled (whether proactively by the background loop or reactively via the chat interface), the backend creates an `Issue` node and a `Resolution` node in Neo4j. The `Resolution` node stores the final action taken (e.g., `apply_credit`), the amount, and the exact message sent to the customer. This essentially acts as a permanent support ticket memory, preventing the agent from issuing duplicate credits the next time the customer reaches out.
