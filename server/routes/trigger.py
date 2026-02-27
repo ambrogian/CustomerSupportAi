@@ -40,7 +40,16 @@ def trigger_delay():
         return jsonify({"error": "orderId is required"}), 400
 
     # Find the order and its customer
-    all_orders = get_all_orders()
+    try:
+        all_orders = get_all_orders()
+    except RuntimeError:
+        # Neo4j unavailable — use demo seed data
+        all_orders = [
+            {"orderId": "order-1042", "customerId": "customer-001", "customerName": "Sarah Chen", "tier": "vip", "product": "Nike Air Max 90", "carrier": "FedEx", "total": 189.99, "status": "shipped"},
+            {"orderId": "order-1043", "customerId": "customer-002", "customerName": "Marcus Johnson", "tier": "standard", "product": "Adidas Ultraboost", "carrier": "UPS", "total": 159.99, "status": "shipped"},
+            {"orderId": "order-1044", "customerId": "customer-003", "customerName": "Priya Patel", "tier": "vip", "product": "New Balance 990v5", "carrier": "FedEx", "total": 199.99, "status": "shipped"},
+        ]
+
     order = next((o for o in all_orders if o["orderId"] == order_id), None)
 
     if not order:
@@ -54,7 +63,10 @@ def trigger_delay():
     emit_delay_detected(order_id, customer_name, carrier, days_late)
 
     # ── Step 2: Update order status in Neo4j ──────────────────
-    update_order_status(order_id, "delayed")
+    try:
+        update_order_status(order_id, "delayed")
+    except RuntimeError:
+        pass  # Neo4j unavailable — skip write
     emit_order_update(order_id, "delayed")
 
     # ── Step 3: Emit Neo4j context retrieval ──────────────────
@@ -102,7 +114,10 @@ def trigger_delay():
     emit_graph_updated()
 
     # Update order to resolved
-    update_order_status(order_id, "resolved")
+    try:
+        update_order_status(order_id, "resolved")
+    except RuntimeError:
+        pass  # Neo4j unavailable — skip write
     emit_order_update(order_id, "resolved")
 
     # Return full result for the API response

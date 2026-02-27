@@ -75,4 +75,4 @@ if __name__ == "__main__":
     startup()
     port = int(os.getenv("PORT", 3001))
     print(f"[Server] Starting on port {port}")
-    socketio.run(app, host="0.0.0.0", port=port, debug=True, use_reloader=False)
+    socketio.run(app, host="0.0.0.0", port=port, debug=True, use_reloader=False, allow_unsafe_werkzeug=True)

@@ -32,7 +32,8 @@ export function useSocket() {
     const socketRef = useRef<Socket | null>(null);
 
     useEffect(() => {
-        const socket = io('http://localhost:3001', {
+        // Connect via Vite proxy (relative URL)
+        const socket = io({
             transports: ['websocket', 'polling'],
         });
         socketRef.current = socket;
