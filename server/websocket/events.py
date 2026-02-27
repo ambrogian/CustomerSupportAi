@@ -129,3 +129,19 @@ def emit_order_update(order_id: str, status: str):
             "orderId": order_id,
             "status": status,
         })
+
+
+def emit_chat_message(role: str, customer_name: str, message: str, action: str = None, credit: float = 0):
+    """
+    Emit a chat message to the dashboard so it can show live conversations.
+    role: 'customer' or 'agent'
+    """
+    if _socketio:
+        _socketio.emit("chat_message", {
+            "timestamp": _timestamp(),
+            "role": role,
+            "customerName": customer_name,
+            "message": message,
+            "action": action,
+            "creditAmount": credit,
+        })

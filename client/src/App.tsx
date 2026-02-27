@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import './index.css';
 import { useSocket } from './hooks/useSocket';
 import OrdersPanel from './components/OrdersPanel';
@@ -8,7 +9,7 @@ import GraphPanel from './components/GraphPanel';
 import TriggerControls from './components/TriggerControls';
 
 function App() {
-  const { isConnected, activities, lastOrderUpdate, graphVersion } = useSocket();
+  const { isConnected, activities, lastOrderUpdate, graphVersion, chatMessages } = useSocket();
 
   const handleTriggerDelay = useCallback(async (orderId: string, daysLate: number) => {
     try {
@@ -84,6 +85,21 @@ function App() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <Link
+            to="/chat"
+            target="_blank"
+            style={{
+              fontSize: '12px',
+              color: 'var(--text-secondary)',
+              textDecoration: 'none',
+              padding: '6px 14px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              transition: 'all 0.2s',
+            }}
+          >
+            💬 Open Customer View
+          </Link>
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -130,7 +146,7 @@ function App() {
 
         {/* Row 2, Col 2: Message Preview */}
         <div style={{ gridColumn: '2', gridRow: '2' }}>
-          <MessagePreview activities={activities} />
+          <MessagePreview chatMessages={chatMessages} />
         </div>
 
         {/* Row 3: Graph (spans full width) */}

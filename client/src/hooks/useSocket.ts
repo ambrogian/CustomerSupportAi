@@ -1,17 +1,26 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 
-interface ActivityEvent {
+export interface ActivityEvent {
     timestamp: string;
     source: string;
     message: string;
     data: Record<string, unknown>;
 }
 
-interface OrderUpdate {
+export interface OrderUpdate {
     timestamp: string;
     orderId: string;
     status: string;
+}
+
+export interface ChatMessageEvent {
+    timestamp: string;
+    role: 'customer' | 'agent';
+    customerName: string;
+    message: string;
+    action?: string;
+    creditAmount?: number;
 }
 
 export function useSocket() {
@@ -19,10 +28,10 @@ export function useSocket() {
     const [activities, setActivities] = useState<ActivityEvent[]>([]);
     const [lastOrderUpdate, setLastOrderUpdate] = useState<OrderUpdate | null>(null);
     const [graphVersion, setGraphVersion] = useState(0);
+    const [chatMessages, setChatMessages] = useState<ChatMessageEvent[]>([]);
     const socketRef = useRef<Socket | null>(null);
 
     useEffect(() => {
-        // Connect to Flask-SocketIO backend
         const socket = io('http://localhost:3001', {
             transports: ['websocket', 'polling'],
         });
@@ -38,19 +47,21 @@ export function useSocket() {
             console.log('[WS] Disconnected');
         });
 
-        // Activity feed events
         socket.on('activity', (event: ActivityEvent) => {
             setActivities(prev => [...prev, event]);
         });
 
-        // Order status updates
         socket.on('order_updated', (data: OrderUpdate) => {
             setLastOrderUpdate(data);
         });
 
-        // Graph data changed
         socket.on('graph_updated', () => {
             setGraphVersion(v => v + 1);
+        });
+
+        // Live chat messages from customer ↔ agent conversations
+        socket.on('chat_message', (data: ChatMessageEvent) => {
+            setChatMessages(prev => [...prev, data]);
         });
 
         return () => {
@@ -67,6 +78,7 @@ export function useSocket() {
         activities,
         lastOrderUpdate,
         graphVersion,
+        chatMessages,
         clearActivities,
     };
 }
