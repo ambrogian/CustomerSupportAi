@@ -86,9 +86,11 @@ class ModulateTranscriptionSession:
 
         def on_error(ws, error):
             print(f"[Modulate] WebSocket error for call {self.call_id}: {error}")
+            self._closed = True
 
         def on_close(ws, close_status_code, close_msg):
             print(f"[Modulate] WebSocket closed for call {self.call_id}")
+            self._closed = True
 
         def on_open(ws):
             ws.send(json.dumps({
@@ -138,8 +140,16 @@ def start_transcription_session(call_id: str, on_transcript_chunk):
     api_key = os.getenv("MODULATE_API_KEY")
 
     if api_key and HAS_WS_CLIENT:
-        print(f"[Modulate] Starting real transcription for call {call_id}")
-        return ModulateTranscriptionSession(call_id, api_key, on_transcript_chunk)
+        try:
+            print(f"[Modulate] Starting real transcription for call {call_id}")
+            session = ModulateTranscriptionSession(call_id, api_key, on_transcript_chunk)
+            # Give the WebSocket a moment to connect; fall back to mock if it fails
+            time.sleep(0.5)
+            if session._closed or session._ws is None:
+                raise ConnectionError("WebSocket failed to connect")
+            return session
+        except Exception as e:
+            print(f"[Modulate] Real API failed ({e}), falling back to mock")
 
     print(f"[Modulate] Starting mock transcription for call {call_id}")
     return MockTranscriptionSession(call_id, on_transcript_chunk)
