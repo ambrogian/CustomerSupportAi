@@ -1,0 +1,248 @@
+@import "tailwindcss";
+
+/* ── Design Tokens ──────────────────────────────────────────── */
+:root {
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #111827;
+  --bg-card: #1a1f2e;
+  --bg-card-hover: #1e2438;
+  --border-color: #2a3041;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  /* Sponsor tool colors */
+  --color-scouting: #3b82f6;   /* blue */
+  --color-neo4j: #22c55e;      /* green */
+  --color-senso: #a855f7;      /* purple */
+  --color-llm: #f97316;        /* orange */
+  --color-browsing: #06b6d4;   /* cyan */
+  --color-system: #6b7280;     /* gray */
+
+  /* Status colors */
+  --status-shipped: #3b82f6;
+  --status-delayed: #ef4444;
+  --status-resolved: #22c55e;
+  --status-delivered: #8b5cf6;
+
+  /* Accents */
+  --accent-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --accent-glow: rgba(102, 126, 234, 0.15);
+}
+
+/* ── Global Reset ─────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ── Scrollbar Styling ────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+/* ── Card Component ───────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  border-color: rgba(102, 126, 234, 0.3);
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.card-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.card-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.card-body {
+  padding: 16px 20px;
+}
+
+/* ── Status Badge ─────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.badge-shipped {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--status-shipped);
+}
+.badge-delayed {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--status-delayed);
+  animation: pulse-badge 2s ease-in-out infinite;
+}
+.badge-resolved {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--status-resolved);
+}
+.badge-delivered {
+  background: rgba(139, 92, 246, 0.15);
+  color: var(--status-delivered);
+}
+
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ── Activity Feed Source Colors ──────────────────────────── */
+.source-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.source-scouting { background: var(--color-scouting); }
+.source-neo4j { background: var(--color-neo4j); }
+.source-senso { background: var(--color-senso); }
+.source-llm { background: var(--color-llm); }
+.source-browsing { background: var(--color-browsing); }
+.source-system { background: var(--color-system); }
+
+/* ── Animations ───────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeInUp 0.3s ease-out forwards;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out forwards;
+}
+
+/* ── Graph Panel ──────────────────────────────────────────── */
+.graph-container {
+  background: radial-gradient(circle at center, #1a1f2e, #0a0e1a);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* ── Chat Bubbles ─────────────────────────────────────────── */
+.chat-bubble {
+  max-width: 85%;
+  padding: 12px 16px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  animation: fadeInUp 0.3s ease-out;
+}
+
+.chat-bubble-agent {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border-bottom-left-radius: 4px;
+  align-self: flex-start;
+}
+
+.chat-bubble-customer {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-bottom-right-radius: 4px;
+  align-self: flex-end;
+}
+
+/* ── Trigger Buttons ──────────────────────────────────────── */
+.trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.trigger-btn:hover {
+  border-color: rgba(102, 126, 234, 0.5);
+  background: var(--bg-card-hover);
+  box-shadow: 0 0 15px var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+.trigger-btn:active {
+  transform: translateY(0);
+}
+
+.trigger-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.trigger-btn .icon {
+  font-size: 18px;
+}
