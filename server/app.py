@@ -5,7 +5,7 @@ Starts the server with:
   1. Neo4j connection + seed data
   2. Route registration
   3. WebSocket (socket.io)
-  4. Agent loop (Phase 2)
+  4. Agent loop (60-second autonomous background thread)
 """
 import os
 import sys
@@ -34,7 +34,7 @@ from server.agent_loop.loop import start_agent_loop
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # ── Register blueprints ───────────────────────────────────────
 app.register_blueprint(chat_bp)
@@ -65,7 +65,8 @@ def startup():
         print("[Startup] Server will start but Neo4j features won't work.")
         print("[Startup] Set NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD in .env")
 
-    # Start agent loop (Phase 2)
+    # Initialize WebSocket and start agent loop
+    init_socketio(socketio)
     start_agent_loop(socketio)
 
 
@@ -74,4 +75,4 @@ if __name__ == "__main__":
     startup()
     port = int(os.getenv("PORT", 3001))
     print(f"[Server] Starting on port {port}")
-    socketio.run(app, host="0.0.0.0", port=port, debug=True)
+    socketio.run(app, host="0.0.0.0", port=port, debug=True, use_reloader=False)
