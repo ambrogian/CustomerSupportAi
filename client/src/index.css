@@ -12,12 +12,20 @@
   --text-muted: #64748b;
 
   /* Sponsor tool colors */
-  --color-scouting: #3b82f6;   /* blue */
-  --color-neo4j: #22c55e;      /* green */
-  --color-senso: #a855f7;      /* purple */
-  --color-llm: #f97316;        /* orange */
-  --color-browsing: #06b6d4;   /* cyan */
-  --color-system: #6b7280;     /* gray */
+  --color-scouting: #3b82f6;
+  /* blue */
+  --color-neo4j: #22c55e;
+  /* green */
+  --color-senso: #a855f7;
+  /* purple */
+  --color-llm: #f97316;
+  /* orange */
+  --color-browsing: #06b6d4;
+  /* cyan */
+  --color-tavily: #eab308;
+  /* yellow */
+  --color-system: #6b7280;
+  /* gray */
 
   /* Status colors */
   --status-shipped: #3b82f6;
@@ -54,9 +62,11 @@ body {
 ::-webkit-scrollbar {
   width: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: var(--bg-secondary);
 }
+
 ::-webkit-scrollbar-thumb {
   background: var(--border-color);
   border-radius: 3px;
@@ -112,23 +122,33 @@ body {
   background: rgba(59, 130, 246, 0.15);
   color: var(--status-shipped);
 }
+
 .badge-delayed {
   background: rgba(239, 68, 68, 0.15);
   color: var(--status-delayed);
   animation: pulse-badge 2s ease-in-out infinite;
 }
+
 .badge-resolved {
   background: rgba(34, 197, 94, 0.15);
   color: var(--status-resolved);
 }
+
 .badge-delivered {
   background: rgba(139, 92, 246, 0.15);
   color: var(--status-delivered);
 }
 
 @keyframes pulse-badge {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
 }
 
 /* ── Activity Feed Source Colors ──────────────────────────── */
@@ -139,12 +159,34 @@ body {
   display: inline-block;
   flex-shrink: 0;
 }
-.source-scouting { background: var(--color-scouting); }
-.source-neo4j { background: var(--color-neo4j); }
-.source-senso { background: var(--color-senso); }
-.source-llm { background: var(--color-llm); }
-.source-browsing { background: var(--color-browsing); }
-.source-system { background: var(--color-system); }
+
+.source-scouting {
+  background: var(--color-scouting);
+}
+
+.source-neo4j {
+  background: var(--color-neo4j);
+}
+
+.source-senso {
+  background: var(--color-senso);
+}
+
+.source-llm {
+  background: var(--color-llm);
+}
+
+.source-browsing {
+  background: var(--color-browsing);
+}
+
+.source-tavily {
+  background: var(--color-tavily);
+}
+
+.source-system {
+  background: var(--color-system);
+}
 
 /* ── Animations ───────────────────────────────────────────── */
 @keyframes fadeInUp {
@@ -152,6 +194,7 @@ body {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -163,6 +206,7 @@ body {
     opacity: 0;
     transform: translateX(-20px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);

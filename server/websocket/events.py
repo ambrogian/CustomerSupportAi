@@ -47,6 +47,7 @@ def emit_activity(source: str, message: str, data: dict = None):
         - senso: Policy lookups (purple)
         - llm: LLM decisions (orange)
         - browsing: Yutori Browsing API (cyan)
+        - tavily: Web Search (yellow)
         - system: General system events (gray)
     """
     if _socketio is None:
@@ -104,6 +105,11 @@ def emit_agent_decision(action: str, credit_amount: float, reasoning: str):
 def emit_browsing_step(step: str):
     """Emit individual Yutori Browsing API steps."""
     emit_activity("browsing", step)
+
+
+def emit_tavily_search(query: str):
+    """Emit when a web search is performed."""
+    emit_activity("tavily", f"Searching web for: '{query}'")
 
 
 def emit_message_sent(customer_name: str, message: str):

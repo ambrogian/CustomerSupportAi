@@ -16,6 +16,8 @@ from server.neo4j_db.queries import (
 )
 from server.integrations.openai_client import call_llm
 from server.integrations.senso import get_policy
+from server.integrations.tavily import search_web
+from server.websocket.events import emit_tavily_search
 from server.orchestrator.prompt import SYSTEM_PROMPT, build_user_prompt
 
 
@@ -60,11 +62,28 @@ def orchestrate(
             "policy": None,
         }
 
-    # Step 2: Get applicable policy if there's a delay
+    # Step 2: Get applicable policy and external context if there's a delay
     policy = None
     if delay_days > 0:
         tier = ctx["customer"].get("tier", "standard")
         policy = get_policy(delay_days, tier)
+        
+        # Step 2.5: Search the web for context (carrier delays, weather) if none provided
+        if not external_context:
+            carrier = "shipping"
+            if order_id and ctx.get("orders"):
+                order = next((o for o in ctx["orders"] if o.get("id") == order_id), None)
+                if order and order.get("carrier"):
+                    carrier = order["carrier"]
+            
+            query = f"{carrier} shipping delays weather news"
+            emit_tavily_search(query)
+            search_res = search_web(query)
+            
+            if search_res.get("results"):
+                external_context = f"Recent web search results for '{query}':\n"
+                for r in search_res["results"]:
+                    external_context += f"- {r['title']}: {r['snippet']}\n"
 
     # Step 3: Build the prompt
     user_prompt = build_user_prompt(
