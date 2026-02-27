@@ -10,15 +10,15 @@ Flow:
   6. Return decision
 """
 from server.neo4j_db.queries import (
-    get_customer_context,
+    get_graph_context,
     create_issue_node,
     create_resolution_node,
 )
 from server.integrations.openai_client import call_llm
 from server.integrations.senso import get_policy
 from server.integrations.tavily import search_web
-from server.websocket.events import emit_tavily_search
-from server.orchestrator.prompt import SYSTEM_PROMPT, build_user_prompt
+from server.websocket.events import emit_tavily_search, emit_neo4j_context, emit_activity
+from server.orchestrator.prompt import build_user_prompt
 
 
 def orchestrate(
@@ -51,7 +51,7 @@ def orchestrate(
     """
     # Step 1: Get full customer context from Neo4j
     try:
-        ctx = get_customer_context(customer_id)
+        ctx = get_graph_context(customer_id)
     except RuntimeError:
         # Neo4j unavailable — use demo fallback context
         _demo_customers = {
@@ -60,7 +60,14 @@ def orchestrate(
             "customer-003": {"name": "Priya Patel", "tier": "vip", "email": "priya@demo.com"},
         }
         cust = _demo_customers.get(customer_id)
-        ctx = {"customer": cust, "orders": [], "issues": [], "resolutions": []} if cust else None
+        if cust:
+            ctx = {
+                "name": cust["name"], "tier": cust["tier"], "ltv": 0,
+                "totalOrders": 1, "totalIssues": 0, "totalCreditsGiven": 0,
+                "issueHistory": [], "orderHistory": []
+            }
+        else:
+            ctx = None
 
     if ctx is None:
         return {
@@ -73,17 +80,23 @@ def orchestrate(
             "policy": None,
         }
 
+    emit_neo4j_context(ctx["name"], ctx["totalOrders"], ctx["totalIssues"], ctx["totalCreditsGiven"])
+    if ctx["totalIssues"] == 0:
+        emit_activity("neo4j", '[Neo4j Graph] First-time issue detected -> applying "first-time" response policy')
+    elif ctx["totalCreditsGiven"] > 100:
+        emit_activity("neo4j", '[Neo4j Graph] High credit history detected -> flagging for review')
+
     # Step 2: Get applicable policy and external context if there's a delay
     policy = None
     if delay_days > 0:
-        tier = ctx["customer"].get("tier", "standard")
+        tier = ctx.get("tier", "standard")
         policy = get_policy(delay_days, tier)
         
         # Step 2.5: Search the web for context (carrier delays, weather) if none provided
         if not external_context:
             carrier = "shipping"
-            if order_id and ctx.get("orders"):
-                order = next((o for o in ctx["orders"] if o.get("id") == order_id), None)
+            if order_id and ctx.get("orderHistory"):
+                order = next((o for o in ctx["orderHistory"] if o.get("orderId") == order_id), None)
                 if order and order.get("carrier"):
                     carrier = order["carrier"]
             
@@ -97,15 +110,17 @@ def orchestrate(
                     external_context += f"- {r['title']}: {r['snippet']}\n"
 
     # Step 3: Build the prompt
-    user_prompt = build_user_prompt(
-        customer_context=ctx,
-        customer_message=customer_message,
+    source = "proactive" if delay_days > 0 and "PROACTIVE ALERT" in customer_message else "reactive"
+    system_prompt, user_prompt = build_user_prompt(
+        graph_context=ctx,
         policy=policy,
+        customer_message=customer_message,
+        source=source,
         external_context=external_context,
     )
 
     # Step 4: Call GPT-4o
-    decision = call_llm(SYSTEM_PROMPT, user_prompt)
+    decision = call_llm(system_prompt, user_prompt)
 
     # Ensure all fields are present with defaults
     decision.setdefault("action", "send_message")

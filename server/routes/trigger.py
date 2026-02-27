@@ -7,7 +7,7 @@ import time
 from flask import Blueprint, request, jsonify
 from server.orchestrator.orchestrator import orchestrate
 from server.integrations.senso import get_policy
-from server.integrations.yutori import execute_shopify_action
+from server.integrations.shopify import apply_store_credit, process_refund
 from server.neo4j_db.queries import get_all_orders, update_order_status
 from server.websocket.events import (
     emit_delay_detected,
@@ -69,8 +69,7 @@ def trigger_delay():
         pass  # Neo4j unavailable — skip write
     emit_order_update(order_id, "delayed")
 
-    # ── Step 3: Emit Neo4j context retrieval ──────────────────
-    emit_neo4j_context(customer_name, tier, order.get("total", 0), 0)
+    # ── Step 3: Neo4j context retrieved internally by orchestrator ──
 
     # ── Step 4: Emit policy lookup ────────────────────────────
     policy = get_policy(days_late, tier)
@@ -100,13 +99,31 @@ def trigger_delay():
         result.get("reasoning", ""),
     )
 
-    # ── Step 7: Execute browsing action if needed ─────────────
+    # ── Step 7: Execute action if needed ─────────────
     action = result.get("action", "")
-    if action in ("apply_credit", "process_refund"):
-        browsing_result = execute_shopify_action(
-            action, order_id, result.get("creditAmount", 0)
+    if action == "apply_credit":
+        api_result = apply_store_credit(
+            order_id, result.get("creditAmount", 0), order.get("customerId", "unknown")
         )
-        for step in browsing_result.get("steps", []):
+        for step in api_result.get("steps", []):
+            emit_activity("system", step)
+    elif action == "process_refund":
+        api_result = process_refund(
+            order_id, result.get("creditAmount", 0), "Delay compensation"
+        )
+        for step in api_result.get("steps", []):
+            emit_activity("system", step)
+    elif action == "file_carrier_claim":
+        from server.integrations.yutori import file_carrier_claim
+        tracking_url = order.get("trackingUrl", "")
+        tracking_num = tracking_url.split("=")[-1] if "=" in tracking_url else order_id
+        api_result = file_carrier_claim(
+            tracking_number=tracking_num,
+            order_total=order.get("total", 0),
+            brand_name="Resolve Sneaker Co.",
+            session_id=order_id
+        )
+        for step in api_result.get("steps", []):
             emit_browsing_step(step)
 
     # ── Step 8: Emit message sent + graph updated ─────────────

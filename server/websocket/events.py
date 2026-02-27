@@ -73,12 +73,12 @@ def emit_delay_detected(order_id: str, customer_name: str, carrier: str, days_la
     )
 
 
-def emit_neo4j_context(customer_name: str, tier: str, ltv: float, prior_issues: int):
-    """Emit when Neo4j customer context is retrieved."""
+def emit_neo4j_context(customer_name: str, orders: int, prior_issues: int, total_credits: float):
+    """Emit when Neo4j graph context is retrieved."""
     emit_activity(
         "neo4j",
-        f"{customer_name} — {tier.upper()}, LTV ${ltv:,.0f}, {prior_issues} prior issue(s)",
-        {"customerName": customer_name, "tier": tier, "ltv": ltv},
+        f"[Neo4j Graph] {customer_name}: {orders} orders, {prior_issues} prior issues, ${total_credits:,.0f} credits given",
+        {"customerName": customer_name},
     )
 
 

@@ -69,6 +69,10 @@ export default function CustomerChat() {
         setLoading(true);
         setLocalError(null);
 
+        // Try to match order pattern like "order-1043" or "1043"
+        const orderMatch = text.match(/(?:order[- ])?(\d{4})/i);
+        const inferredOrderId = orderMatch ? `order-${orderMatch[1]}` : undefined;
+
         try {
             const res = await fetch('http://localhost:3001/api/chat', {
                 method: 'POST',
@@ -76,6 +80,7 @@ export default function CustomerChat() {
                 body: JSON.stringify({
                     customerId: selectedCustomer.id,
                     message: text.trim(),
+                    orderId: inferredOrderId,
                 }),
             });
 

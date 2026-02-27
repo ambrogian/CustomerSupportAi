@@ -1,0 +1,3 @@
+Action: send_message
+Credit Amount: 40.0
+Reasoning: Customer has had 8 prior issues and received $300 in credits. Recent proactive alert indicates another delay. Total credits given already exceed $100 in the last 30 days, so escalating to human review to avoid credit abuse.

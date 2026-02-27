@@ -38,6 +38,57 @@ def get_customer_context(customer_id: str) -> dict:
         }
 
 
+def get_graph_context(customer_id: str) -> dict:
+    """
+    Run a multi-hop graph traversal to return aggregate stats for the Orchestrator prompt.
+    """
+    driver = get_driver()
+    query = """
+    MATCH (c:Customer {id: $customer_id})
+    OPTIONAL MATCH (c)-[:PLACED]->(o:Order)
+    OPTIONAL MATCH (o)-[:HAS_ISSUE]->(i:Issue)
+    OPTIONAL MATCH (i)-[:RESOLVED_BY]->(r:Resolution)
+    RETURN 
+      c.name as name,
+      c.tier as tier,
+      c.ltv as ltv,
+      count(DISTINCT o) as totalOrders,
+      count(DISTINCT i) as totalIssues,
+      sum(r.creditApplied) as totalCreditsGiven,
+      collect(DISTINCT {
+        issueType: i.type,
+        resolution: r.action,
+        credit: r.creditApplied,
+        date: r.timestamp
+      }) as issueHistory,
+      collect(DISTINCT {
+        orderId: o.id,
+        status: o.status,
+        total: o.total
+      }) as orderHistory
+    """
+    with driver.session() as session:
+        result = session.run(query, customer_id=customer_id)
+        record = result.single()
+        if not record:
+            return None
+        
+        # Clean up nulls from OPTIONAL MATCH
+        def clean_list(lst):
+            return [x for x in lst if x and any(v is not None for v in x.values())]
+
+        return {
+            "name": record["name"],
+            "tier": record["tier"],
+            "ltv": record["ltv"],
+            "totalOrders": record["totalOrders"],
+            "totalIssues": record["totalIssues"],
+            "totalCreditsGiven": record["totalCreditsGiven"] or 0,
+            "issueHistory": clean_list(record["issueHistory"]),
+            "orderHistory": clean_list(record["orderHistory"])
+        }
+
+
 def get_all_orders() -> list:
     """Return all orders with their customer info (for the agent loop)."""
     driver = get_driver()
@@ -52,6 +103,43 @@ def get_all_orders() -> list:
         result = session.run(query)
         return [dict(record) for record in result]
 
+
+def check_existing_open_issue(order_id: str) -> bool:
+    """
+    Check if there is already an open Issue for this order.
+    Returns True if an open issue exists, False otherwise.
+    """
+    driver = get_driver()
+    query = """
+    MATCH (o:Order {id: $order_id})-[:HAS_ISSUE]->(i:Issue {status: 'open'})
+    RETURN count(i) > 0 AS has_issue
+    """
+    with driver.session() as session:
+        result = session.run(query, order_id=order_id)
+        record = result.single()
+        return record["has_issue"] if record else False
+
+def get_active_delay_days(order_id: str) -> int:
+    """Check Yutori Scouting to get the current real-time delay days for an active chat order."""
+    if not order_id:
+        return 0
+        
+    driver = get_driver()
+    query = """
+    MATCH (o:Order {id: $order_id})
+    RETURN o.trackingUrl AS url
+    """
+    with driver.session() as session:
+        result = session.run(query, order_id=order_id)
+        record = result.single()
+        if not record or not record.get("url"):
+            return 0
+            
+    from server.integrations.yutori import check_tracking
+    tracking = check_tracking(record["url"])
+    if tracking["status"] == "delayed":
+        return tracking.get("days_late", 0)
+    return 0
 
 def get_graph_data(customer_id: str = None) -> dict:
     """

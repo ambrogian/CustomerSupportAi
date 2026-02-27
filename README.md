@@ -10,14 +10,15 @@
 
 Resolve is a **fully autonomous customer service agent** that:
 
-1. **Monitors** shipping carriers for delays every 60 seconds
-2. **Retrieves** full customer history and lifetime value from a graph database
-3. **Consults** company policy to determine appropriate compensation
-4. **Decides** the best action (apologize, credit, refund, or escalate)
-5. **Executes** the action via Shopify admin (browsing automation)
-6. **Messages** the customer with a personalized, on-brand response
+1. **Monitors** shipping carriers for delays every 60 seconds (with deduplication to prevent double-messaging).
+2. **Retrieves** full, multi-hop customer history and lifetime value from a Neo4j knowledge graph.
+3. **Consults** company policy to determine appropriate compensation based on VIP status and past issues.
+4. **Researches** live carrier delays and weather outages via the Tavily Web Search API.
+5. **Decides** the best action (apologize, credit, refund, escalate, or file carrier claim).
+6. **Executes** financial actions via Direct Shopify REST APIs, or automated web browsing for FedEx claims.
+7. **Messages** the customer with a personalized, context-aware (Proactive vs Reactive) brand response.
 
-All of this happens **without human intervention** — the dashboard shows the agent working in real-time.
+All of this happens **without human intervention** — the Business Dashboard shows the agent working in real-time, while Customers interact in a separate chat UI.
 
 ---
 
@@ -62,18 +63,24 @@ resolve\Scripts\python.exe server\app.py
 cd client && npm run dev
 ```
 
-Open **http://localhost:5173** — the dashboard connects automatically.
-
+Open **http://localhost:5173** for the Business Dashboard.
+Open **http://localhost:5173/chat** in a separate tab for the Customer Chat widget.
 ---
 
-## Demo Flow
-
-1. **On startup**: Neo4j is seeded with 3 demo customers and orders
-2. **Agent loop starts**: Checks all orders every 60 seconds (visible in Activity Feed)
-3. **Trigger a delay**: Click a demo button → watch the full autonomous pipeline fire:
-   - Scouting detects delay → Neo4j context loaded → Policy consulted → AI decides → Shopify action executed → Customer notified
-4. **Customer chat**: Open the customer chat tab to simulate a real conversation
-5. **Knowledge Graph**: Watch new Issue and Resolution nodes appear in real-time
+1. **Setup the split view**: Open the **Business Dashboard** (`http://localhost:5173`) in one browser window, and the **Customer Chat** (`http://localhost:5173/chat`) in another.
+2. **Watch the Agent Loop**: The background agent runs every 60 seconds, checking all orders. You will see these background checks populate the "Activity Feed" panel.
+3. **Observe Neo4j Data**: The Neo4j graph panel shows the visual representation of Customers, Orders, Issues, and Resolutions.
+4. **Trigger a Proactive Delay**: 
+   - On the Business Dashboard, click the "Trigger Delay" button for Sarah's order.
+   - Watch the Activity Feed light up: Demux tracking → Load Neo4j context (noting her past issues and LTV) → Retrieve Senso Policy → Perform Tavily search for weather/carrier news → Send prompt to LLM.
+   - The LLM will autonomously decide to apply a credit and send her an SMS-style proactive apology.
+   - Watch the new `Issue` and `Resolution` nodes instantly wire onto the graph.
+5. **Trigger a Reactive Chat**:
+   - Go to the **Customer Chat** tab. Type a message like: *"Hey my order 1045 is taking forever!"*
+   - Switch back to the Business Dashboard. You will see the agent orchestrate a completely different "Reactive" pipeline, matching the customer's frustration, applying credits directly via Shopify REST API, and returning a real-time response to the chat widget.
+6. **Test Escalation & Rules**:
+   - Manually trigger enough delays/messages for one customer so their total credits exceed $100.
+   - The Neo4j graph prompt will alert the LLM of "credit abuse," and the LLM will automatically switch from `apply_credit` to `escalate` -> requiring human review!
 
 ---
 
@@ -87,8 +94,9 @@ Open **http://localhost:5173** — the dashboard connects automatically.
 | AI Model | Qwen3-32B via Fastino | Autonomous decision-making |
 | Policy Engine | Senso (local fallback) | Compensation rules + brand voice |
 | Carrier Monitoring | Yutori Scouting API | Track shipment delays |
-| Web Actions | Yutori Browsing API | Navigate Shopify admin autonomously |
-| Web Search | Tavily | Real-time external context |
+| Web Actions (Shopify) | Shopify REST API | Direct execution of credits and refunds |
+| Web Actions (FedEx) | Yutori Browsing API | Navigates FedEx autonomously to file lost package claims |
+| Web Search | Tavily API | Real-time external context extraction (weather, shipping news) |
 | Realtime | Socket.IO | Live dashboard updates |
 
 ---

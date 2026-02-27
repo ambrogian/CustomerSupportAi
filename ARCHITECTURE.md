@@ -34,8 +34,9 @@ The same pipeline runs for **customer chat messages** — a customer sends a mes
 | **Fastino LLM (Qwen3-32B)** | ✅ REAL | Live API calls to Pioneer AI. The model receives full customer context, policy rules, and brand voice — returns structured JSON decisions. |
 | **Senso Policy Engine** | 🟡 LOCAL MOCK | Uses a local JSON fallback with real compensation rules (delay tiers, VIP multiplier, refund thresholds, brand voice). Ready to swap for Senso API. |
 | **Yutori Scouting API** | 🟡 MOCK | Returns `on_time` by default. The `/api/trigger-delay` endpoint overrides this to simulate delays. Interface is ready for real Yutori API. |
-| **Yutori Browsing API** | 🟡 MOCK | Returns simulated step-by-step Shopify admin actions (navigate, search order, apply credit). Interface ready for real API. |
-| **Tavily Web Search** | 🟡 MOCK | Returns empty results. Placeholder for real-time carrier news, weather disruptions. |
+| **Shopify REST API** | ✅ REAL | Applies real store credits and processes refunds directly against the Shopify GraphQL/REST backend. |
+| **Yutori Browsing API** | 🟡 MOCK | Specifically repurposed to file FedEx Lost Package claims autonomously for severely delayed orders. |
+| **Tavily Web Search** | ✅ REAL | Returns real-time news about carrier outages and weather disruptions to contextualize LLM responses. |
 | **Modulate (Voice)** | ❌ NOT IMPLEMENTED | Optional — would add emotion/tone scoring from voice input. |
 | **WebSocket Events** | ✅ REAL | All events are emitted live via Socket.IO. Dashboard updates in real time. |
 | **Agent Loop** | ✅ REAL | Background thread running every 60 seconds, checking all orders. |
@@ -52,17 +53,17 @@ The Scouting API monitors carrier tracking URLs on a schedule. In production:
 - **Currently mocked**: Returns `on_time` by default. Delays are simulated via `/api/trigger-delay`.
 
 ### Yutori Browsing API (Autonomous Web Actions)
-The Browsing API is a headless browser agent that navigates web pages and performs actions:
-- Agent sends instructions: "Navigate to Shopify admin, find order X, apply $20 credit"
-- Browsing API executes step-by-step, returning progress
+The Browsing API is a headless browser agent that navigates web pages and performs actions. For the Resolve agent, it is specifically configured to file FedEx claims:
+- Agent sends instructions: "Navigate to FedEx claims portal, enter tracking number X, extract claim ID."
+- Browsing API executes step-by-step, returning progress.
 - **Currently mocked**: Returns realistic step sequences visible in the Activity Feed.
 
 ### Tavily (External Context Search)
-Tavily provides real-time web search for additional context:
+Tavily provides real-time web search for additional context. The backend uses the live API:
 - "Is FedEx experiencing nationwide delays?"
 - "Weather disruptions in shipping region?"
-- Results feed into the orchestrator as external context.
-- **Currently mocked**: Returns empty results.
+- Results feed into the orchestrator as external context before prompting the LLM.
+- **Status**: Live API integration.
 
 ---
 
@@ -101,7 +102,9 @@ The orchestrator (LLM) has access to these tools through the pipeline:
 | `get_customer_context()` | Neo4j | Retrieves customer profile, all orders, prior issues, past resolutions |
 | `get_policy()` | Senso | Looks up compensation rules based on delay severity and customer tier |
 | `check_tracking()` | Yutori Scouting | Checks carrier tracking URL for delivery status |
-| `execute_shopify_action()` | Yutori Browsing | Navigates Shopify admin to apply credits or process refunds |
+| `apply_store_credit()` | Shopify API | Applies a financial credit directly to the customer's Shopify account |
+| `process_refund()` | Shopify API | Processes an immediate order refund via Shopify backend |
+| `file_carrier_claim()` | Yutori Browsing | Interacts with FedEx online portal to file automated lost package claims |
 | `search_web()` | Tavily | Searches for external context (carrier outages, weather) |
 | `create_issue_node()` | Neo4j | Creates an Issue node linked to the Order and Customer |
 | `create_resolution_node()` | Neo4j | Creates a Resolution node linked to the Issue |
@@ -116,9 +119,10 @@ The LLM outputs one of these structured decisions:
 | Action | When | Effect |
 |--------|------|--------|
 | `send_message` | Customer inquiry, no compensation needed | Sends a personalized response only |
-| `apply_credit` | Delay detected, within auto-approve threshold | Applies store credit via Browsing API + sends message |
-| `process_refund` | Major delay (6+ days), high-value order | Processes refund via Browsing API + sends message |
-| `escalate` | Refund > $150, unusual situation, or uncertain | Flags for human review, does NOT auto-execute |
+| `apply_credit` | Delay detected, within auto-approve threshold | Applies store credit via Shopify API + sends message |
+| `process_refund` | Major delay (6+ days), high-value order | Processes refund via Shopify API + sends message |
+| `file_carrier_claim` | Severe delay (10+ days) | Instructs Yutori Browsing to execute online claim filing |
+| `escalate` | Refund > $150, repeat offender (> $100 past credits), or uncertain | Flags for human review, does NOT auto-execute |
 
 ### Decision Factors
 - **Customer Tier**: VIP customers get 2× standard compensation
@@ -181,7 +185,7 @@ The core of Resolve is the `Orchestrator` (`server/orchestrator/orchestrator.py`
 **What are the web agents trying to find?**
 - **Tavily Web Search**: Searches the live web for news and updates affecting shipping, such as "FedEx weather delays" to understand the *cause* of an issue.
 - **Yutori Scouting API**: Monitors carrier tracking pages to find the exact delivery status and days late of a specific package.
-- **Yutori Browsing API**: Acts as an autonomous web navigator. It finds the specific UI elements inside your Shopify Admin dashboard (e.g., the 'Refund' button or the 'Credit Amount' input field) to perform administrative tasks on your behalf.
+- **Yutori Browsing API**: Acts as an autonomous web navigator. It navigates to carrier websites (like FedEx) to automatically file lost package claims without human intervention.
 
 **What can a customer chat with the bot about?**
 The bot is a general-purpose LLM, so it can handle general conversational chat, but its system prompt restricts it to acting as a customer service agent for the DTC sneaker brand. It is primarily designed to autonomously resolve order-related support tickets. Customers can ask it to check their order status, complain about delays, or ask for compensation. The bot can independently decide to grant credits, process refunds, or escalate to a human based on the company policy stored in Senso.

@@ -5,7 +5,7 @@ Emits WebSocket events for the dashboard activity feed.
 """
 from flask import Blueprint, request, jsonify
 from server.orchestrator.orchestrator import orchestrate
-from server.integrations.yutori import execute_shopify_action
+from server.integrations.shopify import apply_store_credit, process_refund
 from server.websocket.events import (
     emit_activity,
     emit_agent_decision,
@@ -14,6 +14,7 @@ from server.websocket.events import (
     emit_chat_message,
     emit_browsing_step,
 )
+from server.neo4j_db.queries import get_active_delay_days
 
 chat_bp = Blueprint("chat", __name__)
 
@@ -36,12 +37,21 @@ def chat():
     emit_activity("system", f"Customer chat received from {customer_id}")
     emit_chat_message("customer", customer_id, message)
 
+    # Look up live delay if they reference an order
+    delay_days = 0
+    if order_id:
+        try:
+            delay_days = get_active_delay_days(order_id)
+        except Exception as e:
+            print(f"Warning: Could not fetch active delay for order {order_id}: {e}")
+
     # Run orchestrator
     try:
         result = orchestrate(
             customer_id=customer_id,
             customer_message=message,
             order_id=order_id,
+            delay_days=delay_days,
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -58,13 +68,29 @@ def chat():
         result.get("reasoning", ""),
     )
 
-    # Execute browsing action if needed
+    # Execute action if needed
     action = result.get("action", "")
-    if action in ("apply_credit", "process_refund"):
-        browsing_result = execute_shopify_action(
-            action, order_id or "unknown", result.get("creditAmount", 0)
+    if action == "apply_credit":
+        api_result = apply_store_credit(
+            order_id or "unknown", result.get("creditAmount", 0), customer_id
         )
-        for step in browsing_result.get("steps", []):
+        for step in api_result.get("steps", []):
+            emit_activity("system", step)
+    elif action == "process_refund":
+        api_result = process_refund(
+            order_id or "unknown", result.get("creditAmount", 0), "Requested via chat"
+        )
+        for step in api_result.get("steps", []):
+            emit_activity("system", step)
+    elif action == "file_carrier_claim":
+        from server.integrations.yutori import file_carrier_claim
+        api_result = file_carrier_claim(
+            tracking_number=order_id or "unknown",
+            order_total=0,
+            brand_name="Resolve Sneaker Co.",
+            session_id=order_id or "unknown"
+        )
+        for step in api_result.get("steps", []):
             emit_browsing_step(step)
 
     # Emit agent response as chat message to dashboard

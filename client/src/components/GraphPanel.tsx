@@ -45,6 +45,7 @@ export default function GraphPanel({ graphVersion, customerId }: Props) {
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'nodes' | 'clusters'>('nodes');
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [lastChange, setLastChange] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 400, height: 300 });
@@ -208,6 +209,8 @@ export default function GraphPanel({ graphVersion, customerId }: Props) {
             width={dimensions.width}
             height={dimensions.height}
             backgroundColor="transparent"
+            onNodeClick={(node: any) => setSelectedNode(node)}
+            onBackgroundClick={() => setSelectedNode(null)}
             nodeCanvasObject={nodeCanvasObject}
             nodePointerAreaPaint={(node: any, color, ctx) => {
               ctx.beginPath();
@@ -233,6 +236,78 @@ export default function GraphPanel({ graphVersion, customerId }: Props) {
             <div className="graph-new-connection-label">New Connection</div>
             <div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
               {lastChange}
+            </div>
+          </div>
+        )}
+
+        {/* Node Inspector Overlay */}
+        {selectedNode && (
+          <div style={{
+            position: 'absolute',
+            top: 16,
+            right: 16,
+            width: 260,
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: '12px',
+            padding: '16px',
+            color: '#f8fafc',
+            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)',
+            zIndex: 20,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            maxHeight: 'calc(100% - 32px)',
+            overflowY: 'auto',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{
+                fontWeight: 600,
+                fontSize: '14px',
+                color: selectedNode.color as string,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}>
+                <span style={{
+                  display: 'inline-block',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: selectedNode.color as string
+                }} />
+                {selectedNode._labels?.[0] || 'Node'}
+              </div>
+              <button
+                onClick={() => setSelectedNode(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  fontSize: '18px',
+                  lineHeight: 1,
+                  padding: '4px'
+                }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {Object.entries(selectedNode)
+                .filter(([k, v]) => !['x', 'y', 'vx', 'vy', 'index', 'color', 'val', 'label', '_labels'].includes(k) && v !== undefined && v !== null)
+                .map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', flexDirection: 'column', paddingBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <span style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '2px' }}>
+                      {k}
+                    </span>
+                    <span style={{ fontSize: '12px', wordBreak: 'break-word', color: '#e2e8f0' }}>
+                      {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                    </span>
+                  </div>
+                ))}
             </div>
           </div>
         )}

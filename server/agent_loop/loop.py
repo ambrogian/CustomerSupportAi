@@ -11,7 +11,8 @@ Flow per iteration:
 import threading
 import time
 from server.neo4j_db.queries import get_all_orders, update_order_status
-from server.integrations.yutori import check_tracking, execute_shopify_action
+from server.integrations.yutori import check_tracking
+from server.integrations.shopify import apply_store_credit, process_refund
 from server.orchestrator.orchestrator import orchestrate
 from server.websocket.events import (
     emit_activity,
@@ -77,16 +78,15 @@ def _check_order(order: dict):
     if tracking["status"] == "delayed" and tracking["days_late"] > 0:
         days_late = tracking["days_late"]
 
+        from server.neo4j_db.queries import check_existing_open_issue
+        if check_existing_open_issue(order_id):
+            emit_activity("system", f"Order {order_id}: Issue already open, skipping orchestrator pipeline.")
+            return
+
         # Emit scouting detection
         emit_delay_detected(order_id, customer_name, carrier, days_late)
 
-        # Step 2: Get context from Neo4j (orchestrator does this internally)
-        emit_neo4j_context(
-            customer_name,
-            order.get("tier", "standard"),
-            order.get("total", 0),
-            0,  # prior issues count — orchestrator will get the real number
-        )
+        # Step 2: Get context from Neo4j (orchestrator does this internally and emits the graph insights)
 
         # Step 3: Policy lookup will happen inside orchestrator
         # We emit it here for the activity feed
@@ -115,15 +115,30 @@ def _check_order(order: dict):
             result.get("reasoning", ""),
         )
 
-        # Step 5: Execute browsing action if needed
+        # Step 5: Execute action if needed
         action = result.get("action", "")
-        if action in ("apply_credit", "process_refund"):
-            browsing_result = execute_shopify_action(
-                action, order_id, result.get("creditAmount", 0)
+        if action == "apply_credit":
+            api_result = apply_store_credit(order_id, result.get("creditAmount", 0), order.get("customerId"))
+            for step in api_result.get("steps", []):
+                emit_activity("system", step)
+                time.sleep(0.3)
+        elif action == "process_refund":
+            api_result = process_refund(order_id, result.get("creditAmount", 0), "Shipping delay")
+            for step in api_result.get("steps", []):
+                emit_activity("system", step)
+                time.sleep(0.3)
+        elif action == "file_carrier_claim":
+            from server.integrations.yutori import file_carrier_claim
+            tracking_num = tracking_url.split("=")[-1] if "=" in tracking_url else order_id
+            api_result = file_carrier_claim(
+                tracking_number=tracking_num,
+                order_total=order.get("total", 0),
+                brand_name="Resolve Sneaker Co.",
+                session_id=order_id
             )
-            for step in browsing_result.get("steps", []):
+            for step in api_result.get("steps", []):
                 emit_browsing_step(step)
-                time.sleep(0.3)  # Slight delay for visual effect in dashboard
+                time.sleep(0.3)
 
         # Step 6: Update order status
         update_order_status(order_id, "resolved")
