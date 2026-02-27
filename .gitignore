@@ -1,0 +1,25 @@
+# Environment
+.env
+
+# Python venv
+resolve/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Node (for client in Phase 3)
+node_modules/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+test_gemini.py
