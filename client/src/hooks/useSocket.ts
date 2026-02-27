@@ -23,7 +23,7 @@ export function useSocket() {
 
     useEffect(() => {
         // Connect to Flask-SocketIO backend
-        const socket = io('http://localhost:3001', {
+        const socket = io({
             transports: ['websocket', 'polling'],
         });
         socketRef.current = socket;
