@@ -62,6 +62,10 @@ export default function CustomerChat() {
 
             const data = await res.json();
 
+            if (!res.ok) {
+                throw new Error(data.error || 'Server returned an error');
+            }
+
             // Determine which tools were used based on the response
             const toolsUsed: string[] = ['Neo4j Context'];
             if (data.policy) toolsUsed.push('Senso Policy');
@@ -72,7 +76,7 @@ export default function CustomerChat() {
 
             const agentMsg: ChatMessage = {
                 role: 'agent',
-                text: data.message || 'I apologize, I was unable to process your request. Let me connect you with a human agent.',
+                text: data.message !== undefined && data.message !== "" ? data.message : 'I understood your request but decided not to send a message back.',
                 timestamp: new Date().toISOString(),
                 action: data.action,
                 creditAmount: data.creditAmount,
@@ -80,10 +84,10 @@ export default function CustomerChat() {
                 toolsUsed,
             };
             setMessages(prev => [...prev, agentMsg]);
-        } catch (err) {
+        } catch (err: any) {
             const errorMsg: ChatMessage = {
                 role: 'agent',
-                text: 'Sorry, I encountered an error. Please try again.',
+                text: `Sorry, I encountered an error: ${err.message}`,
                 timestamp: new Date().toISOString(),
             };
             setMessages(prev => [...prev, errorMsg]);
