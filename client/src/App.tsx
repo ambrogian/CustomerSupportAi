@@ -10,7 +10,7 @@ import TriggerControls from './components/TriggerControls';
 import LiveChatWindow from './components/LiveChatWindow';
 
 function App() {
-  const { isConnected, activities, graphVersion, chatMessages } = useSocket();
+  const { isConnected, activities, graphVersion, chatMessages, socket, incomingCall } = useSocket();
   const [activeTab] = useState('overview');
 
   const handleTriggerDelay = useCallback(async (orderId: string, daysLate: number) => {
@@ -138,7 +138,7 @@ function App() {
       </div>
 
       {/* ── Floating Live Chat ─────────────────────────────── */}
-      <LiveChatWindow chatMessages={chatMessages} />
+      <LiveChatWindow chatMessages={chatMessages} socket={socket} incomingCall={incomingCall} />
 
       {/* ── Status Bar (Footer) ─────────────────────────────── */}
       <footer className="status-bar">

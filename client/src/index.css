@@ -19,6 +19,7 @@
   --color-browsing: #06b6d4;
   --color-tavily: #eab308;
   --color-system: #6b7280;
+  --color-call: #f43f5e;
 
   /* Status colors */
   --status-shipped: #3b82f6;
@@ -287,6 +288,7 @@ body {
 .ticket-card[data-source="browsing"] { border-left-color: var(--color-browsing); }
 .ticket-card[data-source="tavily"] { border-left-color: var(--color-tavily); }
 .ticket-card[data-source="system"] { border-left-color: var(--color-system); }
+.ticket-card[data-source="call"] { border-left-color: var(--color-call); }
 
 .ticket-header {
   display: flex;
@@ -340,6 +342,7 @@ body {
 .source-browsing { background: var(--color-browsing); }
 .source-tavily { background: var(--color-tavily); }
 .source-system { background: var(--color-system); }
+.source-call { background: var(--color-call); }
 
 /* ── Graph Panel ──────────────────────────────────────────── */
 .graph-container {

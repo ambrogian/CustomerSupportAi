@@ -31,6 +31,8 @@ const NODE_COLORS: Record<string, string> = {
   Order: '#a855f7',
   Issue: '#ef4444',
   Resolution: '#22c55e',
+  CallSession: '#f59e0b',
+  Transcript: '#ec4899',
 };
 
 const NODE_SIZES: Record<string, number> = {

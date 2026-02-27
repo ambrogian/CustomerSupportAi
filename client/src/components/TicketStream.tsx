@@ -19,6 +19,7 @@ const SOURCE_LABELS: Record<string, string> = {
   browsing: 'Browsing API',
   tavily: 'Tavily Search',
   system: 'System',
+  call: 'Voice Call',
 };
 
 function relativeTime(ts: string): string {
