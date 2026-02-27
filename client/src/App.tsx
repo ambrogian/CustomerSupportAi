@@ -7,9 +7,10 @@ import GraphPanel from './components/GraphPanel';
 import ReadinessPanel from './components/ReadinessPanel';
 import AnomaliesPanel from './components/AnomaliesPanel';
 import TriggerControls from './components/TriggerControls';
+import LiveChatWindow from './components/LiveChatWindow';
 
 function App() {
-  const { isConnected, activities, graphVersion } = useSocket();
+  const { isConnected, activities, graphVersion, chatMessages } = useSocket();
   const [activeTab] = useState('overview');
 
   const handleTriggerDelay = useCallback(async (orderId: string, daysLate: number) => {
@@ -135,6 +136,9 @@ function App() {
           <AnomaliesPanel activities={activities} />
         </div>
       </div>
+
+      {/* ── Floating Live Chat ─────────────────────────────── */}
+      <LiveChatWindow chatMessages={chatMessages} />
 
       {/* ── Status Bar (Footer) ─────────────────────────────── */}
       <footer className="status-bar">
