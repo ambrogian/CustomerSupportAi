@@ -86,6 +86,26 @@ def build_user_prompt(
         "- reasoning field must reference specific graph data: \"Customer has had 2 prior issues and received $30 in credits. Escalating to human review to avoid credit abuse.\""
     ]
 
+    # Call history
+    calls = customer_context.get("calls", [])
+    if calls:
+        parts.append("\\n=== CALL HISTORY ===")
+        for c in calls:
+            initiated = c.get("initiatedBy", "unknown")
+            duration = c.get("duration", 0)
+            started = c.get("startedAt", "N/A")
+            parts.append(
+                f"- Call on {started[:10]} | Duration: {duration}s | Initiated by: {initiated}"
+            )
+
+    # Transcript summaries from past calls
+    transcripts = customer_context.get("transcripts", [])
+    transcript_summaries = [t for t in transcripts if t.get("summary")]
+    if transcript_summaries:
+        parts.append("\\n=== RECENT TRANSCRIPT SUMMARIES ===")
+        for t in transcript_summaries:
+            parts.append(f"- [{t.get('createdAt', 'N/A')[:10]}] {t.get('summary', '')[:200]}")
+
     if external_context:
         components.append(f"\nEXTERNAL CONTEXT:\n{external_context}")
 

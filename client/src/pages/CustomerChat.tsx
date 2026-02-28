@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useSocket } from '../hooks/useSocket';
+import { io, Socket } from 'socket.io-client';
+import { useWebRTC } from '../hooks/useWebRTC';
+import CallControls from '../components/CallControls';
 
 interface ChatMessage {
     role: 'customer' | 'agent';
@@ -33,6 +36,31 @@ export default function CustomerChat() {
     const [loading, setLoading] = useState(false);
     const chatRef = useRef<HTMLDivElement>(null);
     const [localError, setLocalError] = useState<string | null>(null);
+    const [socket, setSocket] = useState<Socket | null>(null);
+
+    // Initialize Socket.IO connection with customer role
+    useEffect(() => {
+        const s = io({
+            transports: ['websocket', 'polling'],
+            query: { role: 'customer', customerId: selectedCustomer.id },
+        });
+        setSocket(s);
+
+        s.on('connect', () => {
+            console.log(`[CustomerChat] Connected as ${selectedCustomer.name}`);
+        });
+
+        return () => {
+            s.disconnect();
+            setSocket(null);
+        };
+    }, [selectedCustomer.id]);
+
+    const webrtc = useWebRTC({
+        socket,
+        role: 'customer',
+        customerId: selectedCustomer.id,
+    });
 
     // Merge global websocket messages and local transient errors
     const messages = useMemo(() => {
@@ -151,17 +179,32 @@ export default function CustomerChat() {
                         </div>
                     </div>
                 </div>
-                <Link to="/" style={{
-                    fontSize: '12px',
-                    color: '#64748b',
-                    textDecoration: 'none',
-                    padding: '6px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #e2e8f0',
-                    transition: 'all 0.2s',
-                }}>
-                    ← Business Dashboard
-                </Link>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {/* Call controls in header */}
+                    <CallControls
+                        callState={webrtc.callState}
+                        callId={webrtc.callId}
+                        isMuted={webrtc.isMuted}
+                        callDuration={webrtc.callDuration}
+                        transcriptChunks={webrtc.transcriptChunks}
+                        onStartCall={() => webrtc.startCall()}
+                        onAcceptCall={webrtc.acceptCall}
+                        onRejectCall={webrtc.rejectCall}
+                        onEndCall={webrtc.endCall}
+                        onToggleMute={webrtc.toggleMute}
+                    />
+                    <Link to="/" style={{
+                        fontSize: '12px',
+                        color: '#64748b',
+                        textDecoration: 'none',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #e2e8f0',
+                        transition: 'all 0.2s',
+                    }}>
+                        ← Business Dashboard
+                    </Link>
+                </div>
             </header>
 
             {/* Customer Selector */}
@@ -198,6 +241,29 @@ export default function CustomerChat() {
                     </button>
                 ))}
             </div>
+
+            {/* Call transcript panel (shown during connected call) */}
+            {webrtc.callState === 'connected' && webrtc.transcriptChunks.length > 0 && (
+                <div style={{
+                    background: 'white',
+                    padding: '8px 24px',
+                    borderBottom: '1px solid #e2e8f0',
+                    maxHeight: '150px',
+                    overflowY: 'auto',
+                }}>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: '#f59e0b', marginBottom: '4px' }}>
+                        Live Transcript
+                    </div>
+                    {webrtc.transcriptChunks.map((chunk, i) => (
+                        <div key={i} style={{ fontSize: '12px', color: '#475569', marginBottom: '1px' }}>
+                            <span style={{ color: '#94a3b8', fontSize: '10px', marginRight: '6px' }}>
+                                [{new Date(chunk.timestamp).toLocaleTimeString()}]
+                            </span>
+                            {chunk.text}
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {/* Chat Area */}
             <div ref={chatRef} style={{

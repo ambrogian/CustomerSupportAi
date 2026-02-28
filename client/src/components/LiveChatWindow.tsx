@@ -1,8 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { ChatMessageEvent } from '../hooks/useSocket';
+import type { Socket } from 'socket.io-client';
+import type { ChatMessageEvent, IncomingCallEvent } from '../hooks/useSocket';
+import { useWebRTC } from '../hooks/useWebRTC';
+import CallControls from './CallControls';
 
 interface Props {
   chatMessages: ChatMessageEvent[];
+  socket: Socket | null;
+  incomingCall: IncomingCallEvent | null;
 }
 
 // Map customer IDs to display names (backend emits the raw ID for customer-role messages)
@@ -32,7 +37,7 @@ function latestCustomerId(msgs: ChatMessageEvent[]): string | null {
   return null;
 }
 
-export default function LiveChatWindow({ chatMessages }: Props) {
+export default function LiveChatWindow({ chatMessages, socket, incomingCall }: Props) {
   const [visible, setVisible] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
@@ -43,6 +48,15 @@ export default function LiveChatWindow({ chatMessages }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef(0);
 
+  const targetCustomerId = latestCustomerId(chatMessages);
+
+  const webrtc = useWebRTC({
+    socket,
+    role: 'agent',
+    customerId: targetCustomerId || undefined,
+    incomingCall,
+  });
+
   // Auto-show on new messages; mark unread if minimized
   useEffect(() => {
     if (chatMessages.length > prevCount.current) {
@@ -52,12 +66,24 @@ export default function LiveChatWindow({ chatMessages }: Props) {
     prevCount.current = chatMessages.length;
   }, [chatMessages.length, visible, minimized]);
 
+  // Auto-expand on incoming call (from parent prop or webrtc state)
+  useEffect(() => {
+    const hasIncoming = incomingCall || webrtc.callState === 'incoming';
+    if (hasIncoming) {
+      if (!visible) setVisible(true);
+      if (minimized) {
+        setMinimized(false);
+        setHasUnread(false);
+      }
+    }
+  }, [incomingCall, webrtc.callState, visible, minimized]);
+
   // Auto-scroll to bottom
   useEffect(() => {
     if (bodyRef.current && !minimized) {
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
     }
-  }, [chatMessages.length, minimized]);
+  }, [chatMessages.length, minimized, webrtc.transcriptChunks.length]);
 
   // Drag handlers
   const onMouseDown = useCallback((e: React.MouseEvent) => {
@@ -111,7 +137,8 @@ export default function LiveChatWindow({ chatMessages }: Props) {
     }
   };
 
-  if (!visible || chatMessages.length === 0) return null;
+  const hasActiveCall = webrtc.callState !== 'idle' && webrtc.callState !== 'ended';
+  if (!visible || (chatMessages.length === 0 && !incomingCall && !hasActiveCall)) return null;
 
   return (
     <div
@@ -124,7 +151,18 @@ export default function LiveChatWindow({ chatMessages }: Props) {
           Live Chat
           {hasUnread && <span className="live-chat-dot" />}
         </span>
-        <span style={{ display: 'flex', gap: '4px' }}>
+        <span style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+          {/* Phone button in header */}
+          {webrtc.callState === 'idle' && targetCustomerId && (
+            <button
+              className="live-chat-ctrl"
+              onClick={() => webrtc.startCall(targetCustomerId)}
+              title="Start voice call"
+              style={{ color: '#22c55e' }}
+            >
+              &#x260E;
+            </button>
+          )}
           <button
             className="live-chat-ctrl"
             onClick={() => { setMinimized(m => !m); setHasUnread(false); }}
@@ -141,6 +179,29 @@ export default function LiveChatWindow({ chatMessages }: Props) {
       {/* Body + Reply */}
       {!minimized && (
         <>
+          {/* Call controls bar */}
+          {webrtc.callState !== 'idle' && (
+            <div style={{
+              padding: '8px 12px',
+              borderBottom: '1px solid var(--border-color, #e2e8f0)',
+              background: 'rgba(0,0,0,0.02)',
+            }}>
+              <CallControls
+                callState={webrtc.callState}
+                callId={webrtc.callId}
+                isMuted={webrtc.isMuted}
+                callDuration={webrtc.callDuration}
+                transcriptChunks={webrtc.transcriptChunks}
+                onStartCall={() => targetCustomerId && webrtc.startCall(targetCustomerId)}
+                onAcceptCall={webrtc.acceptCall}
+                onRejectCall={webrtc.rejectCall}
+                onEndCall={webrtc.endCall}
+                onToggleMute={webrtc.toggleMute}
+                compact
+              />
+            </div>
+          )}
+
           <div className="live-chat-body" ref={bodyRef}>
             {chatMessages.map((msg, i) => (
               <div key={i} className={`chat-bubble ${msg.role === 'agent' ? 'chat-bubble-agent' : 'chat-bubble-customer'}`}>
@@ -156,6 +217,26 @@ export default function LiveChatWindow({ chatMessages }: Props) {
                 )}
               </div>
             ))}
+
+            {/* Show transcript chunks inline during a connected call */}
+            {webrtc.callState === 'connected' && webrtc.transcriptChunks.length > 0 && (
+              <div style={{
+                marginTop: '8px',
+                padding: '8px',
+                background: 'rgba(245, 158, 11, 0.08)',
+                borderRadius: '8px',
+                border: '1px solid rgba(245, 158, 11, 0.2)',
+              }}>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: '#f59e0b', marginBottom: '4px' }}>
+                  Live Transcript
+                </div>
+                {webrtc.transcriptChunks.map((chunk, i) => (
+                  <div key={i} style={{ fontSize: '11px', color: 'var(--text-secondary, #64748b)', marginBottom: '1px' }}>
+                    {chunk.text}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Reply input */}
