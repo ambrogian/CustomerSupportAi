@@ -68,22 +68,33 @@ def chat():
         result.get("reasoning", ""),
     )
 
-    # Execute action if needed
+    # Emit agent response as chat message to dashboard
     action = result.get("action", "")
+    agent_msg = result.get("message", "")
+    emit_chat_message("agent", customer_id, agent_msg, action, result.get("creditAmount", 0))
+    emit_message_sent(customer_name, agent_msg)
+
+    # Execute action — send follow-up status messages to the customer
     if action == "apply_credit":
+        credit = result.get("creditAmount", 0)
+        emit_chat_message("agent", customer_id, f"Hang on — I'm applying a ${credit:.0f} store credit to your account now...")
         api_result = apply_store_credit(
-            order_id or "unknown", result.get("creditAmount", 0), customer_id
+            order_id or "unknown", credit, customer_id
         )
         for step in api_result.get("steps", []):
             emit_activity("system", step)
+        emit_chat_message("agent", customer_id, f"Done! A ${credit:.0f} credit has been added to your account. You can use it on your next order.")
     elif action == "process_refund":
+        emit_chat_message("agent", customer_id, "Hang on — I'm processing your refund now...")
         api_result = process_refund(
             order_id or "unknown", result.get("creditAmount", 0), "Requested via chat"
         )
         for step in api_result.get("steps", []):
             emit_activity("system", step)
+        emit_chat_message("agent", customer_id, "Your refund has been processed. You should see it back in your account within 3-5 business days.")
     elif action == "file_carrier_claim":
         from server.integrations.yutori import file_carrier_claim
+        emit_chat_message("agent", customer_id, "Hang on — I'm filing a complaint with the carrier right now...")
         api_result = file_carrier_claim(
             tracking_number=order_id or "unknown",
             order_total=0,
@@ -92,11 +103,7 @@ def chat():
         )
         for step in api_result.get("steps", []):
             emit_browsing_step(step)
-
-    # Emit agent response as chat message to dashboard
-    agent_msg = result.get("message", "")
-    emit_chat_message("agent", customer_id, agent_msg, action, result.get("creditAmount", 0))
-    emit_message_sent(customer_name, agent_msg)
+        emit_chat_message("agent", customer_id, "Done! I've filed a claim with the carrier. I'll keep you updated as soon as we hear back.")
 
     if order_id:
         emit_graph_updated()
