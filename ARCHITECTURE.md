@@ -1,28 +1,312 @@
-# Resolve — System Architecture
+# Resolve — Architecture Flow Chart
 
-## How It Works
-
-Resolve is an **autonomous agent loop** that continuously monitors orders, detects issues, and resolves them without human input. Here is the exact flow:
+## System Overview
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    AGENT LOOP (every 60s)                │
-│                                                         │
-│  1. Fetch all orders from Neo4j                         │
-│  2. For each order → call Yutori Scouting API           │
-│  3. If delay detected:                                  │
-│     a. Load customer context from Neo4j                 │
-│     b. Look up compensation policy from Senso           │
-│     c. Send context + policy → LLM (Qwen3-32B)         │
-│     d. LLM returns structured decision JSON             │
-│     e. Execute action via Yutori Browsing API           │
-│     f. Write Issue + Resolution nodes to Neo4j          │
-│     g. Emit events to dashboard via WebSocket           │
-│  4. If no delay → log "on_time" and move on             │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              RESOLVE                                         │
+│                   Autonomous Customer Support Agent                          │
+│                                                                              │
+│  ┌─────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐  │
+│  │  Customer    │   │  NexusCore   │   │  Agent Loop  │   │  Voice Call   │  │
+│  │  Chat Page   │   │  Dashboard   │   │  (60s cycle) │   │  (WebRTC)    │  │
+│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘  │
+│         │                  │                   │                  │           │
+│         └──────────────────┴───────────────────┴──────────────────┘           │
+│                                    │                                          │
+│                          ┌─────────▼──────────┐                              │
+│                          │    ORCHESTRATOR     │                              │
+│                          │  (Decision Engine)  │                              │
+│                          └─────────┬──────────┘                              │
+│                                    │                                          │
+│         ┌──────────┬───────────────┼───────────────┬──────────┐              │
+│         ▼          ▼               ▼               ▼          ▼              │
+│    ┌─────────┐ ┌────────┐   ┌──────────┐   ┌─────────┐ ┌─────────┐         │
+│    │  Neo4j  │ │ Senso  │   │ Fastino  │   │ Tavily  │ │ Yutori  │         │
+│    │ (Graph) │ │ (KB)   │   │  (LLM)   │   │ (Search)│ │(Track)  │         │
+│    └─────────┘ └────────┘   └──────────┘   └─────────┘ └─────────┘         │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The same pipeline runs for **customer chat messages** — a customer sends a message, and the orchestrator decides the best response autonomously.
+---
+
+## Data Flow — Three Paths
+
+### Path 1: Reactive (Customer Chat)
+
+```
+Customer types message
+        │
+        ▼
+  POST /api/chat
+  { customerId, message, orderId? }
+        │
+        ▼
+┌───────────────────────────────────────────────────────────┐
+│                    ORCHESTRATOR PIPELINE                    │
+│                                                            │
+│  ① Neo4j ──→ Customer context (profile, orders, issues)   │
+│       │                                                    │
+│  ② Senso ──→ Compensation policy (tier-based)              │
+│       │                                                    │
+│  ③ Tavily ─→ Web context (carrier delays, weather)         │
+│       │                                                    │
+│  ④ Prompt ──→ Assemble system + user messages              │
+│       │       ┌─────────────────────────────────────┐      │
+│       │       │ Customer: Sarah Chen (VIP, $2400)   │      │
+│       │       │ Order: #1042 — 4 days late          │      │
+│       │       │ History: 1 prior issue, $30 credits │      │
+│       │       │ Policy: $10 base x 2 VIP = $20     │      │
+│       │       │ Message: "Where is my order?"       │      │
+│       │       └─────────────────────────────────────┘      │
+│       │                                                    │
+│  ⑤ Fastino LLM (Qwen3-32B)                                │
+│       │       ┌─────────────────────────────────────┐      │
+│       │       │ { action: "apply_credit",           │      │
+│       │       │   message: "Hi Sarah, we've...",    │      │
+│       │       │   creditAmount: 20,                 │      │
+│       │       │   requiresHumanReview: false,       │      │
+│       │       │   reasoning: "VIP, 4-day delay" }   │      │
+│       │       └─────────────────────────────────────┘      │
+│       │                                                    │
+│  ⑥ Neo4j ──→ Create Issue + Resolution nodes               │
+│       │                                                    │
+│  ⑦ Execute action (Shopify credit / refund / claim)        │
+└───────┼────────────────────────────────────────────────────┘
+        │
+        ▼
+  WebSocket events ──→ Dashboard updates in real-time
+  JSON response    ──→ Customer sees agent reply
+```
+
+### Path 2: Proactive (Agent Loop)
+
+```
+  ┌─────────────────────────────┐
+  │  Agent Loop (every 60s)     │
+  │  daemon thread              │
+  └─────────────┬───────────────┘
+                │
+                ▼
+  ┌─────────────────────────────┐
+  │  For each active order:     │
+  │                             │
+  │  Yutori Scouting API        │
+  │  → Check tracking URL       │
+  │  → Returns delay status     │
+  └─────────────┬───────────────┘
+                │
+          delayed?
+          /     \
+        yes      no ──→ skip
+        │
+        ▼
+  ┌─────────────────────────────┐
+  │  Check Neo4j for existing   │
+  │  open issue (dedup)         │
+  └─────────────┬───────────────┘
+                │
+          exists?
+          /     \
+        yes      no
+        │        │
+        ▼        ▼
+      skip    ORCHESTRATOR
+              (same pipeline as Path 1)
+                │
+                ▼
+        Execute action:
+        ├── apply_credit  ──→ Shopify gift card API
+        ├── process_refund ──→ Shopify refund API
+        ├── file_carrier_claim ──→ Yutori Browsing API
+        │                         (navigates carrier website)
+        └── escalate ──→ Flag for human review
+                │
+                ▼
+        Update order status → "resolved"
+        Emit WebSocket events → Dashboard
+```
+
+### Path 3: Voice Call (WebRTC + Transcription)
+
+```
+  Agent clicks Call          Customer receives
+  (or vice versa)            incoming call alert
+        │                           │
+        ▼                           ▼
+  socket: call_initiate ──→ socket: call_incoming
+                                    │
+                              Accept / Reject
+                                    │
+                              ┌─────▼─────┐
+                              │  ACCEPT    │
+                              └─────┬─────┘
+                                    │
+        ┌───────────────────────────┼───────────────────────────┐
+        │                    WebRTC Setup                        │
+        │                                                        │
+        │  1. getUserMedia({ audio: true })  — both sides        │
+        │  2. RTCPeerConnection (STUN: stun.l.google.com)        │
+        │  3. SDP Offer / Answer exchange via Socket.IO           │
+        │  4. ICE Candidate exchange via Socket.IO                │
+        │  5. Peer-to-peer audio stream established               │
+        └───────────────────────────┬───────────────────────────┘
+                                    │
+        ┌───────────────────────────┼───────────────────────────┐
+        │               Audio Capture & Transcription            │
+        │                                                        │
+        │  Browser:                                              │
+        │  AudioContext (16kHz) → ScriptProcessor (4096 samples) │
+        │       │                                                │
+        │       ▼                                                │
+        │  socket: audio_chunk (PCM Int16)                       │
+        │       │                                                │
+        │  Server:                                               │
+        │       ▼                                                │
+        │  Modulate WebSocket API                                │
+        │  (or mock: phrase every 10 chunks)                     │
+        │       │                                                │
+        │       ▼                                                │
+        │  socket: transcript_chunk ──→ Both browsers            │
+        │  { text, isFinal, chunkIndex }   see live transcript   │
+        └───────────────────────────┬───────────────────────────┘
+                                    │
+                              Call Ends
+                                    │
+        ┌───────────────────────────▼───────────────────────────┐
+        │                Post-Call Processing                    │
+        │                (background thread)                     │
+        │                                                        │
+        │  1. Create CallSession node in Neo4j                   │
+        │  2. Create Transcript node with full text               │
+        │  3. Run orchestrator on transcript                      │
+        │     "Analyze this call, determine follow-up actions"   │
+        │  4. Update Transcript.summary with LLM reasoning        │
+        │  5. Emit graph_updated + activity events                │
+        └───────────────────────────────────────────────────────┘
+```
+
+---
+
+## Neo4j Graph Schema
+
+```
+                            ┌──────────────┐
+                     ┌──────│   CUSTOMER    │──────┐
+                     │      │              │      │
+                     │      │ id           │      │
+                     │      │ name         │      │
+                     │      │ email        │      │
+                     │      │ tier (vip/std)│      │
+                     │      │ ltv          │      │
+                     │      └──────────────┘      │
+                     │              │              │
+                [:PLACED]     [:HAD_ISSUE]    [:HAD_CALL]
+                     │              │              │
+                     ▼              │              ▼
+              ┌──────────────┐     │      ┌──────────────┐
+              │    ORDER     │     │      │ CALL SESSION │
+              │              │     │      │              │
+              │ id           │     │      │ id           │
+              │ product      │     │      │ startedAt    │
+              │ status       │     │      │ endedAt      │
+              │ carrier      │     │      │ duration     │
+              │ trackingUrl  │     │      │ initiatedBy  │
+              │ estDelivery  │     │      │ status       │
+              │ total        │     │      └──────┬───────┘
+              └──────┬───────┘     │             │
+                     │             │      [:HAS_TRANSCRIPT]
+                [:HAS_ISSUE]       │             │
+                     │             │             ▼
+                     ▼             │      ┌──────────────┐
+              ┌──────────────┐     │      │  TRANSCRIPT  │
+              │    ISSUE     │◄────┘      │              │
+              │              │            │ id           │
+              │ id           │            │ callId       │
+              │ type         │            │ fullText     │
+              │ description  │            │ summary      │
+              │ status       │            │ source       │
+              │ createdAt    │            └──────────────┘
+              └──────┬───────┘
+                     │
+               [:RESOLVED_BY]
+                     │
+                     ▼
+              ┌──────────────┐
+              │  RESOLUTION  │
+              │              │
+              │ id           │
+              │ action       │
+              │ creditApplied│
+              │ message      │
+              │ timestamp    │
+              └──────────────┘
+```
+
+---
+
+## LLM Decision Logic
+
+```
+                    ┌─────────────────────────────┐
+                    │     Fastino LLM Decides      │
+                    └─────────────┬───────────────┘
+                                  │
+          ┌───────────┬───────────┼───────────┬──────────────┐
+          ▼           ▼           ▼           ▼              ▼
+    send_message  apply_credit  process_   escalate    file_carrier_
+                                refund                     _claim
+          │           │           │           │              │
+          ▼           ▼           ▼           ▼              ▼
+      Reply only   Shopify     Shopify     Flag for      Yutori
+      to customer  gift card   refund API  human         Browsing API
+                   API                     review        (navigate &
+                                                        submit form)
+
+  ┌───────────────────────────────────────────────────────────────┐
+  │                     Decision Rules                             │
+  │                                                                │
+  │  Delay 1-2 days  ──→  $0 credit (message only)                │
+  │  Delay 3-5 days  ──→  $10 credit                              │
+  │  Delay 6+ days   ──→  $25 credit                              │
+  │  VIP customer    ──→  x 2.0 multiplier                        │
+  │  Credits > $100  ──→  escalate (human review)                  │
+  │  Delay 10+ days  ──→  file_carrier_claim                      │
+  │  2+ prior issues ──→  acknowledge repeat problem               │
+  │  First issue     ──→  extra warm tone                          │
+  │  Prior refund    ──→  offer replacement, not another refund    │
+  └───────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Integration Map
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         INTEGRATIONS                                 │
+│                                                                      │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────────┐ │
+│  │  Fastino LLM │   │  Senso KB    │   │  Yutori                  │ │
+│  │              │   │              │   │                          │ │
+│  │  Qwen3-32B   │   │  Policy      │   │  Scouting: Track orders  │ │
+│  │  via Pioneer  │   │  lookup      │   │  Browsing: File claims   │ │
+│  │  AI API       │   │  + fallback  │   │  + mock fallback         │ │
+│  └──────────────┘   └──────────────┘   └──────────────────────────┘ │
+│                                                                      │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────────┐ │
+│  │  Tavily      │   │  Shopify     │   │  Modulate                │ │
+│  │              │   │              │   │                          │ │
+│  │  Web search   │   │  Gift cards  │   │  Real-time speech-to-   │ │
+│  │  for carrier  │   │  Refunds     │   │  text via WebSocket     │ │
+│  │  delay context│   │  + mock      │   │  + mock fallback        │ │
+│  └──────────────┘   └──────────────┘   └──────────────────────────┘ │
+│                                                                      │
+│  All integrations follow the same pattern:                           │
+│  1. Try real API (if API key set)                                    │
+│  2. Fall back to mock/local data (for development)                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -30,165 +314,176 @@ The same pipeline runs for **customer chat messages** — a customer sends a mes
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| **Neo4j AuraDB** | ✅ REAL | Live graph database storing customers, orders, issues, resolutions. All CRUD operations are real Cypher queries. |
-| **Fastino LLM (Qwen3-32B)** | ✅ REAL | Live API calls to Pioneer AI. The model receives full customer context, policy rules, and brand voice — returns structured JSON decisions. |
-| **Senso Policy Engine** | 🟡 LOCAL MOCK | Uses a local JSON fallback with real compensation rules (delay tiers, VIP multiplier, refund thresholds, brand voice). Ready to swap for Senso API. |
-| **Yutori Scouting API** | 🟡 MOCK | Returns `on_time` by default. The `/api/trigger-delay` endpoint overrides this to simulate delays. Interface is ready for real Yutori API. |
-| **Shopify REST API** | ✅ REAL | Applies real store credits and processes refunds directly against the Shopify GraphQL/REST backend. |
-| **Yutori Browsing API** | 🟡 MOCK | Specifically repurposed to file FedEx Lost Package claims autonomously for severely delayed orders. |
-| **Tavily Web Search** | ✅ REAL | Returns real-time news about carrier outages and weather disruptions to contextualize LLM responses. |
-| **Modulate (Voice)** | ❌ NOT IMPLEMENTED | Optional — would add emotion/tone scoring from voice input. |
-| **WebSocket Events** | ✅ REAL | All events are emitted live via Socket.IO. Dashboard updates in real time. |
-| **Agent Loop** | ✅ REAL | Background thread running every 60 seconds, checking all orders. |
+| **Neo4j AuraDB** | REAL | Live graph database storing customers, orders, issues, resolutions, calls, transcripts |
+| **Fastino LLM (Qwen3-32B)** | REAL | Live API calls to Pioneer AI. Returns structured JSON decisions |
+| **Senso Policy Engine** | LOCAL MOCK | Local JSON fallback with real compensation rules. Ready to swap for Senso API |
+| **Yutori Scouting API** | MOCK | Returns `on_time` by default. `/api/trigger-delay` simulates delays |
+| **Yutori Browsing API** | MOCK | Files FedEx claims autonomously. Returns realistic step sequences |
+| **Shopify REST API** | REAL | Applies store credits and processes refunds against Shopify backend |
+| **Tavily Web Search** | REAL | Returns real-time news about carrier outages and weather disruptions |
+| **Modulate Transcription** | MOCK + REAL | Real WebSocket API if reachable; falls back to mock transcript chunks |
+| **WebSocket Events** | REAL | All events emitted live via Socket.IO |
+| **WebRTC Voice Calls** | REAL | Browser-to-browser peer-to-peer audio via RTCPeerConnection |
+| **Agent Loop** | REAL | Background thread running every 60 seconds |
 
 ---
 
-## How Web Agents Work
+## Real-Time Event System
 
-### Yutori Scouting API (Carrier Monitoring)
-The Scouting API monitors carrier tracking URLs on a schedule. In production:
-- Agent sends a tracking URL (e.g., FedEx/UPS tracking link)
-- Scouting API navigates to the carrier website, extracts status
-- Returns structured data: `{ status, days_late, estimated_delivery, carrier_message }`
-- **Currently mocked**: Returns `on_time` by default. Delays are simulated via `/api/trigger-delay`.
-
-### Yutori Browsing API (Autonomous Web Actions)
-The Browsing API is a headless browser agent that navigates web pages and performs actions. For the Resolve agent, it is specifically configured to file FedEx claims:
-- Agent sends instructions: "Navigate to FedEx claims portal, enter tracking number X, extract claim ID."
-- Browsing API executes step-by-step, returning progress.
-- **Currently mocked**: Returns realistic step sequences visible in the Activity Feed.
-
-### Tavily (External Context Search)
-Tavily provides real-time web search for additional context. The backend uses the live API:
-- "Is FedEx experiencing nationwide delays?"
-- "Weather disruptions in shipping region?"
-- Results feed into the orchestrator as external context before prompting the LLM.
-- **Status**: Live API integration.
-
----
-
-## How Conversations Work
-
-### Customer-Initiated Chat
 ```
-Customer → POST /api/chat → Orchestrator:
-  1. Query Neo4j: full customer profile, order history, past issues
-  2. Query Senso: applicable policy (if delay context exists)
-  3. Build prompt with all context → send to LLM
-  4. LLM returns: { action, message, creditAmount, reasoning }
-  5. If action involves credits/refunds → call Browsing API
-  6. Write Issue + Resolution to Neo4j
-  7. Emit WebSocket events → dashboard updates live
-  8. Return message to customer
-```
+  Server emits                Socket.IO                Dashboard receives
+  ────────────               ──────────               ──────────────────
 
-### Proactive Agent (No Customer Message)
-```
-Agent Loop detects delay → creates synthetic alert message:
-  "PROACTIVE ALERT: Order #1042 is 4 days late. Customer Sarah Chen is VIP."
-  → Same orchestrator pipeline runs
-  → Agent sends proactive message to customer
-  → Dashboard shows the full autonomous resolution
+  emit_activity()     ──→    "activity"        ──→    TicketStream feed
+  (color-coded)                                       ┌─────────────────────────┐
+                                                      │  scouting: delay detect │
+                                                      │  neo4j: context loaded  │
+                                                      │  senso: policy lookup   │
+                                                      │  llm: decision made     │
+                                                      │  call: voice event      │
+                                                      │  tavily: web search     │
+                                                      │  browsing: automation   │
+                                                      │  system: general        │
+                                                      └─────────────────────────┘
+
+  emit_chat_message() ──→    "chat_message"    ──→    LiveChatWindow
+
+  emit_graph_updated()──→    "graph_updated"   ──→    GraphPanel re-fetches
+
+  emit_order_update() ──→    "order_updated"   ──→    Order status badge
+
+  (call signaling)    ──→    "call_incoming"   ──→    CallControls UI
+                             "call_started"           (ring / accept / end)
+                             "call_ended"
+                             "transcript_chunk" ──→   Live transcript panel
 ```
 
 ---
 
-## Orchestrator Tools
-
-The orchestrator (LLM) has access to these tools through the pipeline:
-
-| Tool | Source | What It Does |
-|------|--------|-------------|
-| `get_customer_context()` | Neo4j | Retrieves customer profile, all orders, prior issues, past resolutions |
-| `get_policy()` | Senso | Looks up compensation rules based on delay severity and customer tier |
-| `check_tracking()` | Yutori Scouting | Checks carrier tracking URL for delivery status |
-| `apply_store_credit()` | Shopify API | Applies a financial credit directly to the customer's Shopify account |
-| `process_refund()` | Shopify API | Processes an immediate order refund via Shopify backend |
-| `file_carrier_claim()` | Yutori Browsing | Interacts with FedEx online portal to file automated lost package claims |
-| `search_web()` | Tavily | Searches for external context (carrier outages, weather) |
-| `create_issue_node()` | Neo4j | Creates an Issue node linked to the Order and Customer |
-| `create_resolution_node()` | Neo4j | Creates a Resolution node linked to the Issue |
-| `update_order_status()` | Neo4j | Updates order status (shipped → delayed → resolved) |
-
----
-
-## Orchestrator Decision States
-
-The LLM outputs one of these structured decisions:
-
-| Action | When | Effect |
-|--------|------|--------|
-| `send_message` | Customer inquiry, no compensation needed | Sends a personalized response only |
-| `apply_credit` | Delay detected, within auto-approve threshold | Applies store credit via Shopify API + sends message |
-| `process_refund` | Major delay (6+ days), high-value order | Processes refund via Shopify API + sends message |
-| `file_carrier_claim` | Severe delay (10+ days) | Instructs Yutori Browsing to execute online claim filing |
-| `escalate` | Refund > $150, repeat offender (> $100 past credits), or uncertain | Flags for human review, does NOT auto-execute |
-
-### Decision Factors
-- **Customer Tier**: VIP customers get 2× standard compensation
-- **LTV (Lifetime Value)**: Higher LTV = more generous treatment
-- **Delay Severity**: 1-2 days (apology), 3-5 days (credit), 6+ days (refund)
-- **Prior Issues**: Repeat issues → more generous resolution
-- **Refund Threshold**: Anything > $150 gets flagged for human review
-
-### Brand Voice Rules
-- Warm, direct, never robotic
-- Use the customer's first name
-- Never say "I apologize for the inconvenience"
-- Explain credits/refunds in plain English
-
----
-
-## Neo4j Data Model
+## Frontend Architecture
 
 ```
-(Customer)-[:PLACED]->(Order)
-(Order)-[:HAS_ISSUE]->(Issue)
-(Issue)-[:RESOLVED_BY]->(Resolution)
-(Customer)-[:HAD_ISSUE]->(Issue)
+┌──────────────────────────────────────────────────────────────────┐
+│                        React App (Vite)                          │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  HOOKS (shared state)                                      │  │
+│  │                                                            │  │
+│  │  useSocket ──→ Socket.IO connection, activities,           │  │
+│  │               chatMessages, incomingCall, graphVersion     │  │
+│  │                                                            │  │
+│  │  useWebRTC ──→ RTCPeerConnection, callState, audio        │  │
+│  │               capture, transcript chunks                   │  │
+│  └────────────────────────┬───────────────────────────────────┘  │
+│                           │                                      │
+│  ┌────────────────────────▼───────────────────────────────────┐  │
+│  │  PAGES                                                     │  │
+│  │                                                            │  │
+│  │  / (Dashboard — NexusCore)         /chat (Customer Chat)   │  │
+│  │  ┌──────┬──────────┬────────┐     ┌────────────────────┐  │  │
+│  │  │Ticket│ Graph    │Readiness│     │ Customer selector  │  │  │
+│  │  │Stream│ Panel    │Panel   │     │ Chat messages      │  │  │
+│  │  │      │(force    │        │     │ Call controls      │  │  │
+│  │  │      │ graph)   │Anomaly │     │ Live transcript    │  │  │
+│  │  │      │          │Panel   │     │ Quick replies      │  │  │
+│  │  └──────┴──────────┴────────┘     └────────────────────┘  │  │
+│  │                                                            │  │
+│  │  ┌─────────────────────────────┐                          │  │
+│  │  │  LiveChatWindow (floating)  │                          │  │
+│  │  │  Chat messages + CallCtrl   │                          │  │
+│  │  │  Auto-opens on new message  │                          │  │
+│  │  │  or incoming call           │                          │  │
+│  │  └─────────────────────────────┘                          │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
 ```
-
-**Node Properties:**
-- **Customer**: id, name, email, ltv, tier ('standard' | 'vip')
-- **Order**: id, product, status, carrier, trackingUrl, estimatedDelivery, total
-- **Issue**: id, type, description, status ('open' | 'resolved'), createdAt
-- **Resolution**: id, action, creditApplied, message, timestamp
 
 ---
 
-## WebSocket Events (Activity Feed)
+## File Structure
 
-Each event is color-coded by source:
+```
+CustomerSupportAi/
+├── server/
+│   ├── app.py                          # Entry point — Flask + Socket.IO
+│   ├── orchestrator/
+│   │   ├── orchestrator.py             # Decision pipeline (6 steps)
+│   │   └── prompt.py                   # System/user prompt construction
+│   ├── neo4j_db/
+│   │   ├── connection.py               # Neo4j driver singleton
+│   │   ├── queries.py                  # All Cypher queries
+│   │   └── seed.py                     # Demo data (3 customers, 3 orders)
+│   ├── integrations/
+│   │   ├── openai_client.py            # Fastino LLM (OpenAI-compatible)
+│   │   ├── senso.py                    # Policy knowledge base
+│   │   ├── yutori.py                   # Scouting (tracking) + Browsing (claims)
+│   │   ├── tavily.py                   # Web search
+│   │   ├── shopify.py                  # Gift cards + refunds
+│   │   └── modulate.py                 # Speech-to-text transcription
+│   ├── routes/
+│   │   └── api.py                      # HTTP endpoints
+│   ├── websocket/
+│   │   └── events.py                   # Socket.IO handlers + call signaling
+│   └── agent_loop/
+│       └── loop.py                     # Autonomous 60s background loop
+│
+├── client/                             # React + TypeScript + Vite
+│   ├── src/
+│   │   ├── App.tsx                     # Dashboard (NexusCore 3-column)
+│   │   ├── pages/
+│   │   │   └── CustomerChat.tsx        # Customer chat page (/chat)
+│   │   ├── hooks/
+│   │   │   ├── useSocket.ts            # Socket.IO state management
+│   │   │   └── useWebRTC.ts            # WebRTC call management
+│   │   └── components/
+│   │       ├── GraphPanel.tsx           # Neo4j force-graph visualization
+│   │       ├── TicketStream.tsx         # Activity feed
+│   │       ├── ReadinessPanel.tsx       # Accuracy + confidence metrics
+│   │       ├── AnomaliesPanel.tsx       # Escalation alerts
+│   │       ├── TriggerControls.tsx      # Demo controls
+│   │       ├── LiveChatWindow.tsx       # Floating chat overlay
+│   │       └── CallControls.tsx         # Voice call UI
+│   └── vite.config.ts                  # Proxy: /api + /socket.io → :3001
+│
+└── .env                                # API keys (not committed)
+```
 
-| Source | Color | Events |
-|--------|-------|--------|
-| 🔵 Scouting API | Blue | Delay detected, tracking status checks |
-| 🟢 Neo4j | Green | Customer context loaded, graph updated |
-| 🟣 Senso | Purple | Policy lookup results |
-| 🟠 LLM | Orange | AI decision made |
-| 🔵 Browsing API | Cyan | Shopify navigation steps |
-| ⚪ System | Gray | Agent loop status, messages sent |
+---
+
+## HTTP API Endpoints
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/health` | GET | Health check |
+| `/api/chat` | POST | Customer sends message → orchestrator pipeline |
+| `/api/chat/agent` | POST | Human agent replies via dashboard |
+| `/api/trigger-delay` | POST | Demo: simulate shipping delay |
+| `/api/graph` | GET | Neo4j graph data for visualization |
+| `/api/orders` | GET | All orders with customer info |
 
 ---
 
 ## Frequently Asked Questions
 
 **What does the agent actually do and how does it orchestrate?**
-The core of Resolve is the `Orchestrator` (`server/orchestrator/orchestrator.py`). It is a pipeline that is triggered either every 60 seconds by the background agent loop or manually via a customer chat message.
+The core of Resolve is the `Orchestrator` (`server/orchestrator/orchestrator.py`). It is a pipeline triggered either every 60 seconds by the background agent loop or manually via a customer chat message.
 1. It gathers context from **Neo4j** (customer tier, LTV, past issues).
 2. It gathers policy rules from **Senso** (refund thresholds, credit amounts).
 3. It gathers external context from **Tavily/Yutori** (weather delays, carrier status).
 4. It sends all this data to the **Fastino LLM** (Qwen3-32B) to make a decision.
-5. If the LLM decides to apply a credit or refund, the Orchestrator calls the **Yutori Browsing API** to execute the action in Shopify autonomously.
+5. If the LLM decides to apply a credit or refund, the Orchestrator calls the **Shopify API** to execute the action.
 6. Finally, it records the entire interaction back into **Neo4j** as an `Issue` and `Resolution`.
 
 **What are the web agents trying to find?**
-- **Tavily Web Search**: Searches the live web for news and updates affecting shipping, such as "FedEx weather delays" to understand the *cause* of an issue.
+- **Tavily Web Search**: Searches the live web for news affecting shipping, such as "FedEx weather delays" to understand the *cause* of an issue.
 - **Yutori Scouting API**: Monitors carrier tracking pages to find the exact delivery status and days late of a specific package.
 - **Yutori Browsing API**: Acts as an autonomous web navigator. It navigates to carrier websites (like FedEx) to automatically file lost package claims without human intervention.
 
 **What can a customer chat with the bot about?**
-The bot is a general-purpose LLM, so it can handle general conversational chat, but its system prompt restricts it to acting as a customer service agent for the DTC sneaker brand. It is primarily designed to autonomously resolve order-related support tickets. Customers can ask it to check their order status, complain about delays, or ask for compensation. The bot can independently decide to grant credits, process refunds, or escalate to a human based on the company policy stored in Senso.
+The bot is a general-purpose LLM restricted to acting as a customer service agent for the DTC sneaker brand. It autonomously resolves order-related support tickets. Customers can ask about order status, complain about delays, or request compensation. The bot independently decides to grant credits, process refunds, or escalate based on company policy.
 
-**Does my Neo4j graph update with the memory of the conversation with the chatbot?**
-Yes. When an issue is handled (whether proactively by the background loop or reactively via the chat interface), the backend creates an `Issue` node and a `Resolution` node in Neo4j. The `Resolution` node stores the final action taken (e.g., `apply_credit`), the amount, and the exact message sent to the customer. This essentially acts as a permanent support ticket memory, preventing the agent from issuing duplicate credits the next time the customer reaches out.
+**Does the Neo4j graph update with conversation memory?**
+Yes. When an issue is handled (proactively or reactively), the backend creates `Issue` and `Resolution` nodes in Neo4j. The `Resolution` node stores the action taken, the amount, and the message sent. This acts as permanent support ticket memory, preventing duplicate credits on repeat contact. Voice call transcripts are also persisted as `CallSession` and `Transcript` nodes.
+
+**How do voice calls work?**
+Either side (customer or agent) can initiate a call. The call uses browser-to-browser WebRTC for peer-to-peer audio. During the call, audio is captured at 16kHz and streamed to the Modulate transcription API (or a mock) for real-time speech-to-text. After the call ends, the full transcript is saved to Neo4j and the orchestrator analyzes it for follow-up actions.

@@ -53,7 +53,8 @@ def get_graph_context(customer_id: str) -> dict:
     OPTIONAL MATCH (c)-[:PLACED]->(o:Order)
     OPTIONAL MATCH (o)-[:HAS_ISSUE]->(i:Issue)
     OPTIONAL MATCH (i)-[:RESOLVED_BY]->(r:Resolution)
-    RETURN 
+    OPTIONAL MATCH (c)-[:HAD_CALL]->(call:CallSession)-[:HAS_TRANSCRIPT]->(t:Transcript)
+    RETURN
       c.name as name,
       c.tier as tier,
       c.ltv as ltv,
@@ -68,9 +69,22 @@ def get_graph_context(customer_id: str) -> dict:
       }) as issueHistory,
       collect(DISTINCT {
         orderId: o.id,
+        product: o.product,
         status: o.status,
+        carrier: o.carrier,
         total: o.total
-      }) as orderHistory
+      }) as orderHistory,
+      collect(DISTINCT {
+        callId: call.id,
+        startedAt: call.startedAt,
+        duration: call.duration,
+        initiatedBy: call.initiatedBy
+      }) as calls,
+      collect(DISTINCT {
+        callId: t.callId,
+        summary: t.summary,
+        createdAt: t.createdAt
+      }) as transcripts
     """
     with driver.session() as session:
         result = session.run(query, customer_id=customer_id)
@@ -90,7 +104,9 @@ def get_graph_context(customer_id: str) -> dict:
             "totalIssues": record["totalIssues"],
             "totalCreditsGiven": record["totalCreditsGiven"] or 0,
             "issueHistory": clean_list(record["issueHistory"]),
-            "orderHistory": clean_list(record["orderHistory"])
+            "orderHistory": clean_list(record["orderHistory"]),
+            "calls": clean_list(record["calls"]),
+            "transcripts": clean_list(record["transcripts"]),
         }
 
 

@@ -60,6 +60,13 @@ def build_user_prompt(
             f"- Max auto-approve: ${max_approve}\n"
         )
     
+    # Format order history so the LLM can see the customer's orders
+    order_history = graph_context.get("orderHistory", [])
+    order_history_str = "\n".join([
+        f"- {o.get('orderId', 'Unknown')}: {o.get('product', 'Unknown product')} — status: {o.get('status', 'unknown')}, total: ${o.get('total', 0)}"
+        for o in order_history
+    ]) if order_history else "- None"
+
     components = [
         f"CUSTOMER PROFILE (from knowledge graph):",
         f"- Name: {name}",
@@ -68,6 +75,8 @@ def build_user_prompt(
         f"- Total Orders: {total_orders}",
         f"- Past Issues: {total_issues}",
         f"- Total Credits Already Given: ${total_credits:,.2f}",
+        f"\nORDER HISTORY:",
+        order_history_str,
         f"\nISSUE HISTORY (last 3):",
         issue_history_str,
         f"\n{policy_str}",
@@ -87,24 +96,24 @@ def build_user_prompt(
     ]
 
     # Call history
-    calls = customer_context.get("calls", [])
+    calls = graph_context.get("calls", [])
     if calls:
-        parts.append("\\n=== CALL HISTORY ===")
+        components.append("\n=== CALL HISTORY ===")
         for c in calls:
             initiated = c.get("initiatedBy", "unknown")
             duration = c.get("duration", 0)
             started = c.get("startedAt", "N/A")
-            parts.append(
+            components.append(
                 f"- Call on {started[:10]} | Duration: {duration}s | Initiated by: {initiated}"
             )
 
     # Transcript summaries from past calls
-    transcripts = customer_context.get("transcripts", [])
+    transcripts = graph_context.get("transcripts", [])
     transcript_summaries = [t for t in transcripts if t.get("summary")]
     if transcript_summaries:
-        parts.append("\\n=== RECENT TRANSCRIPT SUMMARIES ===")
+        components.append("\n=== RECENT TRANSCRIPT SUMMARIES ===")
         for t in transcript_summaries:
-            parts.append(f"- [{t.get('createdAt', 'N/A')[:10]}] {t.get('summary', '')[:200]}")
+            components.append(f"- [{t.get('createdAt', 'N/A')[:10]}] {t.get('summary', '')[:200]}")
 
     if external_context:
         components.append(f"\nEXTERNAL CONTEXT:\n{external_context}")
